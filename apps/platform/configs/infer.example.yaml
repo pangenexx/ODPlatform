@@ -1,0 +1,7 @@
+model: runs/train/exp/weights/best.pt
+source: ./data/RSOD/yolo/images/val
+imgsz: 640
+conf_threshold: 0.25
+iou_threshold: 0.45
+device: '0'
+save_results: true

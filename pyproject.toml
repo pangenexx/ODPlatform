@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odplatform-workspace"
+version = "1.0.0"
+description = "Object Detection Platform - Workspace Root"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = []
+
+[tool.uv.workspace]
+members = [
+    "apps/platform",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "apps/platform/tests"]

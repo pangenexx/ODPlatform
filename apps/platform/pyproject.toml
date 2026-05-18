@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odp-platform"
+version = "1.0.0"
+description = "Object Detection Platform - Core Engine"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+dependencies = [
+    "ultralytics>=8.0.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+odp-trans = "odp_platform.cli.trans:main"
+odp-validate = "odp_platform.cli.validate:main"
+odp-train = "odp_platform.cli.train:main"
+odp-val = "odp_platform.cli.val:main"
+odp-infer = "odp_platform.cli.infer:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

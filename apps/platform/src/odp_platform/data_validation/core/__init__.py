@@ -1,0 +1,1 @@
+"""Data validation core module."""
