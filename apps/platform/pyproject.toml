@@ -36,7 +36,9 @@ dependencies = [
     "ultralytics>=8,<9.0",
     "scikit-learn >= 1.8.0",
     "pillow",
-    "pyyaml>=6.0"
+    "pyyaml>=6.0",
+    "gradio>=5.0,<6.0",
+    "matplotlib",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +60,7 @@ odp-transform = "odp_platform.cli.transform_data:main"
 odp-validate = "odp_platform.cli.validate_data:main"
 odp-config = "odp_platform.cli.config_cli:main"
 odp-train = "odp_platform.cli.train:main"
+odp-webui = "odp_platform.webui.app:main"
 
 # =============================================================================
 # Hatchling 配置 (告诉它两件事: 包源码在哪、版本号从哪读)
