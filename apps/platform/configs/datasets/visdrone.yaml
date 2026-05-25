@@ -1,0 +1,27 @@
+path: data/yolo/visdrone
+train: train/images
+val: val/images
+
+nc: 10
+names:
+  0: pedestrian
+  1: people
+  2: bicycle
+  3: car
+  4: van
+  5: truck
+  6: tricycle
+  7: awning-tricycle
+  8: bus
+  9: motor
+
+odp_meta:
+  dataset: visdrone
+  source_format: pascal_voc
+  task: detect
+  created_at: '2026-05-25T00:00:00'
+  split:
+    train_rate: 0.8
+    val_rate: 0.1
+    random_state: 42
+  schema_version: 1

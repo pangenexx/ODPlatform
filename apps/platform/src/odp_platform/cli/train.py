@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,7 @@ from odp_platform.common.constants import AnnotationFormat, RunTask, Task
 from odp_platform.common.logging_utils import get_logger
 from odp_platform.common.paths import (
     APP_DIR,
+    CHECKPOINTS_DIR,
     CONFIGS_DIR,
     CONFIGS_DATASETS_DIR,
     DATA_DIR,
@@ -28,6 +31,7 @@ from odp_platform.run_config import (
     generate_template_to_file,
     save_snapshot_to_file,
 )
+from odp_platform.training.callbacks import TrainingHooks
 
 logger = logging.getLogger("odp-train")
 
@@ -240,6 +244,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         logger.error(f"      数据集 YAML 不存在: {data_yaml}")
         return 2
 
+    ultralytics_args["project"] = str(RUNS_DIR / "experiments")
+    ultralytics_args["name"] = experiment_name
+    exp_dir = RUNS_DIR / "experiments" / experiment_name
+
+    hooks = TrainingHooks()
+    config_json = json.dumps(ultralytics_args, ensure_ascii=False)
+    hooks.on_train_start(
+        name=experiment_name,
+        config_json=config_json,
+        dataset=dataset,
+        model=ultralytics_args.get("model", "yolo11n.pt"),
+    )
+
     try:
         model = YOLO(ultralytics_args.get("model", "yolo11n.pt"))
         results = model.train(
@@ -248,12 +265,41 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         logger.info(f"      训练完成")
         step_results["train"] = "success"
+
+        results_csv = exp_dir / "results.csv"
+        epoch_count = 0
+        if results_csv.exists():
+            with open(results_csv, encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    hooks.on_epoch_end_from_csv_row(row)
+                    epoch_count += 1
+            logger.info(f"      已同步 {epoch_count} 个 epoch 指标到数据库")
+
+        best_pt = exp_dir / "weights" / "best.pt"
+        checkpoint_path = ""
+        if best_pt.exists():
+            checkpoint_name = f"best_{experiment_name}.pt"
+            checkpoint_path = str(CHECKPOINTS_DIR / checkpoint_name)
+            shutil.copy(best_pt, checkpoint_path)
+            logger.info(f"      模型权重已复制到 {checkpoint_path}")
+
+        best_map50 = 0.0
+        if results_csv.exists():
+            with open(results_csv, encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            if rows:
+                best_map50 = max(float(r.get("metrics/mAP50(B)", 0)) for r in rows)
+
+        hooks.on_train_end(best_map50=best_map50, model_path=checkpoint_path)
         return 0
     except KeyboardInterrupt:
         logger.warning("训练被用户中断")
+        hooks.on_train_failed(reason="用户中断")
         return 3
     except Exception as e:
         logger.exception(f"训练失败: {e}")
+        hooks.on_train_failed(reason=str(e))
         return 2
     finally:
         summary_path = snapshot_run_dir / "train_summary.json"
