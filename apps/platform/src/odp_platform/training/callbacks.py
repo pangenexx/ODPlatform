@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import json
-import sys
+import shutil
+import time
 from pathlib import Path
 from typing import Optional
 
+import requests
+
 from odp_platform.common.logging_utils import get_logger
-from odp_platform.common.paths import LOGGING_DIR, ROOT_DIR
+from odp_platform.common.paths import (
+    CHECKPOINTS_DIR,
+    LOGGING_DIR,
+)
 
 logger = get_logger(
     base_path=LOGGING_DIR,
@@ -14,126 +19,591 @@ logger = get_logger(
     logger_name="odp-train",
 )
 
-_WEB_BACKEND_DIR: Path = ROOT_DIR / "apps" / "web-backend"
-if str(_WEB_BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(_WEB_BACKEND_DIR))
 
-_BACKEND_AVAILABLE: bool = False
-_hooks = None
-try:
-    from hooks import (
-        on_epoch_end as _on_epoch_end,
-        on_training_end as _on_training_end,
-        on_training_failed as _on_training_failed,
-        on_training_start as _on_training_start,
+# =========================================================
+# Backend Config
+# =========================================================
+
+BACKEND_URL = "http://127.0.0.1:8000"
+
+MAX_RETRIES = 3
+RETRY_DELAY = 1.0
+
+
+# =========================================================
+# HTTP Utils
+# =========================================================
+
+def _post_with_retry(
+    url: str,
+    json_data: dict,
+    label: str = "",
+) -> Optional[dict]:
+    """
+    带重试 POST
+
+    后端未启动时：
+        记录 warning
+        不中断训练
+    """
+
+    for attempt in range(1, MAX_RETRIES + 1):
+
+        try:
+
+            r = requests.post(
+                url,
+                json=json_data,
+                timeout=5,
+            )
+
+            r.raise_for_status()
+
+            return r.json()
+
+        except requests.exceptions.RequestException as e:
+
+            logger.warning(
+                f"[{label}] "
+                f"后端通信失败 "
+                f"(尝试 {attempt}/{MAX_RETRIES}): {e}"
+            )
+
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+
+    logger.error(
+        f"[{label}] "
+        f"重试耗尽，放弃同步"
     )
-    _BACKEND_AVAILABLE = True
-    logger.info("后端 hooks 已加载，训练进度将同步到数据库")
-except ImportError:
-    logger.info("后端 hooks 不可用（跳过），训练不受影响")
 
+    return None
+
+
+# ---------------------------------------------------------
+
+def _patch_with_retry(
+    url: str,
+    json_data: dict,
+    label: str = "",
+) -> Optional[dict]:
+    """
+    带重试 PATCH
+    """
+
+    for attempt in range(1, MAX_RETRIES + 1):
+
+        try:
+
+            r = requests.patch(
+                url,
+                json=json_data,
+                timeout=5,
+            )
+
+            r.raise_for_status()
+
+            return r.json()
+
+        except requests.exceptions.RequestException as e:
+
+            logger.warning(
+                f"[{label}] "
+                f"后端 PATCH 失败 "
+                f"(尝试 {attempt}/{MAX_RETRIES}): {e}"
+            )
+
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+
+    logger.error(
+        f"[{label}] "
+        f"PATCH 重试耗尽"
+    )
+
+    return None
+
+
+# =========================================================
+# EarlyStopping
+# =========================================================
+
+class EarlyStopping:
+    """
+    EarlyStopping
+
+    根据验证集 map50 自动停止训练
+    """
+
+    def __init__(
+        self,
+        patience: int = 50,
+        min_delta: float = 1e-4,
+    ):
+        self.patience = patience
+        self.min_delta = min_delta
+
+        self.best_score = -1.0
+
+        self.counter = 0
+
+        self.should_stop = False
+
+    # -----------------------------------------------------
+
+    def step(
+        self,
+        score: float,
+    ) -> bool:
+        """
+        更新状态
+
+        Returns:
+            bool:
+                是否应该停止训练
+        """
+
+        # 第一次
+        if self.best_score < 0:
+
+            self.best_score = score
+
+            logger.info(
+                f"初始化 best score: {score:.6f}"
+            )
+
+            return False
+
+        # 有提升
+        if score > self.best_score + self.min_delta:
+
+            logger.info(
+                f"metric improved: "
+                f"{self.best_score:.6f} "
+                f"-> {score:.6f}"
+            )
+
+            self.best_score = score
+
+            self.counter = 0
+
+            return False
+
+        # 无提升
+        self.counter += 1
+
+        logger.info(
+            f"metric not improved "
+            f"({self.counter}/{self.patience})"
+        )
+
+        # 触发停止
+        if self.counter >= self.patience:
+
+            self.should_stop = True
+
+            logger.warning(
+                "触发 EarlyStopping"
+            )
+
+            return True
+
+        return False
+
+
+# =========================================================
+# Best Checkpoint
+# =========================================================
+
+class BestCheckpointManager:
+    """
+    自动保存 best mAP checkpoint
+    """
+
+    def __init__(
+        self,
+        experiment_name: str,
+    ):
+        self.experiment_name = experiment_name
+
+        self.best_map50 = -1.0
+
+        self.best_model_path: Optional[Path] = None
+
+    # -----------------------------------------------------
+
+    def update(
+        self,
+        map50: float,
+        current_checkpoint: str | Path,
+    ) -> bool:
+        """
+        更新 best checkpoint
+
+        Returns:
+            bool:
+                是否更新了 best
+        """
+
+        current_checkpoint = Path(
+            current_checkpoint
+        )
+
+        # 当前 checkpoint 不存在
+        if not current_checkpoint.exists():
+
+            logger.warning(
+                f"checkpoint 不存在: "
+                f"{current_checkpoint}"
+            )
+
+            return False
+
+        # 没提升
+        if map50 <= self.best_map50:
+
+            return False
+
+        # 更新 best
+        self.best_map50 = map50
+
+        target_path = (
+            CHECKPOINTS_DIR
+            / f"best_{self.experiment_name}.pt"
+        )
+
+        target_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        shutil.copy(
+            current_checkpoint,
+            target_path,
+        )
+
+        self.best_model_path = target_path
+
+        logger.info(
+            f"best checkpoint 更新: "
+            f"mAP50={map50:.6f} "
+            f"-> {target_path}"
+        )
+
+        return True
+
+
+# =========================================================
+# Training Hooks
+# =========================================================
 
 class TrainingHooks:
-    def __init__(self, backend_url: str = "http://127.0.0.1:8000") -> None:
-        self._exp_id: Optional[int] = None
-        self._backend_url: str = backend_url
-        self._is_available: bool = _BACKEND_AVAILABLE
+    """
+    训练回调系统
 
-    @property
-    def exp_id(self) -> Optional[int]:
-        return self._exp_id
+    功能：
+        - backend 通信
+        - epoch metrics 同步
+        - 训练状态同步
+    """
 
-    @property
-    def is_available(self) -> bool:
-        return self._is_available
+    def __init__(
+        self,
+        experiment_name: str,
+        config_json: str,
+    ):
+        self.exp_name = experiment_name
+
+        self.config_json = config_json
+
+        self.exp_id: Optional[int] = None
+
+    # =====================================================
+    # train start
+    # =====================================================
 
     def on_train_start(
         self,
-        name: str,
-        config_json: str,
         dataset: str,
         model: str,
-    ) -> Optional[int]:
-        if not self._is_available:
-            return None
-        exp_id = _on_training_start(
-            name=name,
-            config_json=config_json,
-            dataset=dataset,
-            model=model,
-            base_url=self._backend_url,
+    ):
+        """
+        训练开始
+
+        POST:
+            /api/experiments
+        """
+
+        payload = {
+            "name":
+                self.exp_name,
+
+            "config_json":
+                self.config_json,
+
+            "dataset":
+                dataset,
+
+            "model":
+                model,
+        }
+
+        result = _post_with_retry(
+            f"{BACKEND_URL}/api/experiments",
+            payload,
+            label="train_start",
         )
-        self._exp_id = exp_id
-        return exp_id
+
+        if result:
+
+            self.exp_id = result.get("id")
+
+            logger.info(
+                f"实验注册成功: "
+                f"id={self.exp_id}"
+            )
+
+    # =====================================================
+    # epoch end
+    # =====================================================
 
     def on_epoch_end(
         self,
         epoch: int,
-        train_loss: float = 0.0,
-        val_loss: float = 0.0,
-        map50: float = 0.0,
-        map50_95: float = 0.0,
-        precision: float = 0.0,
-        recall: float = 0.0,
-        lr: float = 0.0,
-    ) -> None:
-        if not self._is_available or self._exp_id is None:
+        metrics: dict,
+    ):
+        """
+        epoch 结束
+
+        POST:
+            /api/experiments/{id}/epochs
+        """
+
+        if self.exp_id is None:
+
+            logger.warning(
+                "exp_id is None，"
+                "跳过 epoch 同步"
+            )
+
             return
-        _on_epoch_end(
-            experiment_id=self._exp_id,
+
+        payload = {
+            "epoch":
+                epoch,
+
+            **metrics,
+        }
+
+        _post_with_retry(
+            f"{BACKEND_URL}/api/experiments/"
+            f"{self.exp_id}/epochs",
+
+            payload,
+
+            label=f"epoch_{epoch}",
+        )
+
+    # =====================================================
+    # train end
+    # =====================================================
+
+    def on_train_end(
+        self,
+        map50: float,
+        model_path: str,
+    ):
+        """
+        训练结束
+
+        PATCH:
+            /api/experiments/{id}/status
+        """
+
+        if self.exp_id is None:
+
+            logger.warning(
+                "exp_id is None，"
+                "跳过 train_end 同步"
+            )
+
+            return
+
+        payload = {
+            "status":
+                "completed",
+
+            "best_map50":
+                map50,
+
+            "model_path":
+                model_path,
+        }
+
+        result = _patch_with_retry(
+            f"{BACKEND_URL}/api/experiments/"
+            f"{self.exp_id}/status",
+
+            payload,
+
+            label="train_end",
+        )
+
+        if result:
+
+            logger.info(
+                f"实验完成同步: "
+                f"id={self.exp_id}"
+            )
+
+
+# =========================================================
+# Combined Callback Manager
+# =========================================================
+
+class CallbackManager:
+    """
+    统一 callback manager
+
+    聚合：
+        - EarlyStopping
+        - BestCheckpoint
+        - Backend Hooks
+    """
+
+    def __init__(
+        self,
+        experiment_name: str,
+        config_json: str,
+        patience: int = 50,
+    ):
+        self.hooks = TrainingHooks(
+            experiment_name,
+            config_json,
+        )
+
+        self.early_stopping = EarlyStopping(
+            patience=patience,
+        )
+
+        self.checkpoint_manager = (
+            BestCheckpointManager(
+                experiment_name
+            )
+        )
+
+    # -----------------------------------------------------
+
+    def on_train_start(
+        self,
+        dataset: str,
+        model: str,
+    ):
+        self.hooks.on_train_start(
+            dataset,
+            model,
+        )
+
+    # -----------------------------------------------------
+
+    def on_epoch_end(
+        self,
+        epoch: int,
+        metrics: dict,
+        checkpoint_path: str | Path,
+    ) -> bool:
+        """
+        epoch 结束统一处理
+
+        Returns:
+            bool:
+                是否应该停止训练
+        """
+
+        # backend sync
+        self.hooks.on_epoch_end(
+            epoch,
+            metrics,
+        )
+
+        # checkpoint
+        self.checkpoint_manager.update(
+            metrics.get("map50", 0),
+            checkpoint_path,
+        )
+
+        # early stopping
+        should_stop = (
+            self.early_stopping.step(
+                metrics.get("map50", 0)
+            )
+        )
+
+        return should_stop
+
+    # -----------------------------------------------------
+
+    def on_train_end(
+        self,
+        map50: float,
+        model_path: str,
+    ):
+        self.hooks.on_train_end(
+            map50,
+            model_path,
+        )
+
+
+# =========================================================
+# Debug
+# =========================================================
+
+if __name__ == "__main__":
+
+    callbacks = CallbackManager(
+        experiment_name="debug_exp",
+        config_json='{"epochs": 100}',
+        patience=3,
+    )
+
+    callbacks.on_train_start(
+        dataset="rsod",
+        model="yolo11n.pt",
+    )
+
+    scores = [
+        0.50,
+        0.55,
+        0.57,
+        0.56,
+        0.55,
+        0.54,
+    ]
+
+    for epoch, score in enumerate(scores):
+
+        metrics = {
+            "map50": score,
+            "precision": 0.8,
+            "recall": 0.7,
+        }
+
+        stop = callbacks.on_epoch_end(
             epoch=epoch,
-            metrics={
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-                "map50": map50,
-                "map50_95": map50_95,
-                "precision": precision,
-                "recall": recall,
-                "lr": lr,
-            },
-            base_url=self._backend_url,
+            metrics=metrics,
+            checkpoint_path="dummy.pt",
         )
 
-    def on_epoch_end_from_csv_row(self, row: dict[str, str]) -> None:
-        epoch = int(row.get("epoch", 0))
-        if epoch == 0:
-            return
-        train_loss = (
-            float(row.get("train/box_loss", 0))
-            + float(row.get("train/cls_loss", 0))
-            + float(row.get("train/dfl_loss", 0))
-        )
-        val_loss = (
-            float(row.get("val/box_loss", 0))
-            + float(row.get("val/cls_loss", 0))
-            + float(row.get("val/dfl_loss", 0))
-        )
-        self.on_epoch_end(
-            epoch=epoch,
-            train_loss=round(train_loss, 4),
-            val_loss=round(val_loss, 4),
-            map50=round(float(row.get("metrics/mAP50(B)", 0)), 4),
-            map50_95=round(float(row.get("metrics/mAP50-95(B)", 0)), 4),
-            precision=round(float(row.get("metrics/precision(B)", 0)), 4),
-            recall=round(float(row.get("metrics/recall(B)", 0)), 4),
-            lr=float(row.get("lr/pg0", 0)),
+        print(
+            f"epoch={epoch} "
+            f"map50={score:.4f} "
+            f"stop={stop}"
         )
 
-    def on_train_end(self, best_map50: float, model_path: str) -> None:
-        if not self._is_available or self._exp_id is None:
-            return
-        _on_training_end(
-            experiment_id=self._exp_id,
-            map50=best_map50,
-            model_path=model_path,
-            base_url=self._backend_url,
-        )
+        if stop:
+            break
 
-    def on_train_failed(self, reason: str = "") -> None:
-        if not self._is_available or self._exp_id is None:
-            return
-        _on_training_failed(
-            experiment_id=self._exp_id,
-            reason=reason,
-            base_url=self._backend_url,
-        )
+    callbacks.on_train_end(
+        map50=0.57,
+        model_path="best_debug.pt",
+    )
