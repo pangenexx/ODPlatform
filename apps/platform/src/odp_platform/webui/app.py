@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import sys
-import time
-import urllib.request
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -13,18 +10,16 @@ if __package__ in {None, ""}:
 import gradio as gr
 
 from odp_platform.common.logging_utils import get_logger
-from odp_platform.common.paths import LOGGING_DIR, ROOT_DIR
+from odp_platform.common.paths import LOGGING_DIR
 from odp_platform.webui.config_tab import create_config_ui
 from odp_platform.webui.dashboard import create_dashboard_ui
+from odp_platform.webui.dataset_analysis import create_dataset_analysis_ui
 from odp_platform.webui.dataset_browser import create_dataset_browser_ui
 from odp_platform.webui.model_demo import create_model_demo_ui
 from odp_platform.webui.training_tab import create_training_ui
 from odp_platform.webui.validation_tab import create_validation_ui
 
 logger = logging.getLogger(__name__)
-
-BACKEND_URL = "http://127.0.0.1:8000"
-BACKEND_DIR = ROOT_DIR / "apps" / "web-backend"
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 WALLPAPER_PATH = ASSETS_DIR / "wallpaper-prism.png"
@@ -420,15 +415,9 @@ gradio-app {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.34),
     0 16px 42px rgba(5, 10, 18, 0.12) !important;
-}
-
-/* 下拉选项面板（position:fixed）确保不被遮挡、可滚动 */
-ul.options,
-div[class*="dropdown"] div[role="listbox"],
-div[class*="Dropdown"] div[role="listbox"] {
-  z-index: 9999 !important;
-  max-height: 50vh !important;
-  overflow-y: auto !important;
+  backdrop-filter: blur(20px) saturate(1.45);
+  -webkit-backdrop-filter: blur(20px) saturate(1.45);
+  overflow: hidden !important;
 }
 
 .form {
@@ -790,7 +779,11 @@ def create_app() -> gr.Blocks:
     )
     logger.info("创建 ODPlatform Gradio UI")
 
-    with gr.Blocks(title="ODPlatform") as app:
+    with gr.Blocks(
+        title="ODPlatform",
+        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
+        css=APP_CSS,
+    ) as app:
         with gr.Column(elem_classes=["odp-shell"]):
             gr.HTML(
                 """
@@ -809,6 +802,8 @@ def create_app() -> gr.Blocks:
                     create_dashboard_ui()
                 with gr.TabItem("数据集浏览"):
                     create_dataset_browser_ui()
+                with gr.TabItem("数据集分析"):
+                    create_dataset_analysis_ui()
                 with gr.TabItem("训练"):
                     create_training_ui()
                 with gr.TabItem("模型演示"):
@@ -820,50 +815,10 @@ def create_app() -> gr.Blocks:
     return app
 
 
-def _ensure_backend_running(timeout: float = 10.0) -> bool:
-    """检测后端是否运行，未运行则自动启动。"""
-    # 快速检测
-    try:
-        urllib.request.urlopen(f"{BACKEND_URL}/health", timeout=1)
-        logger.info("后端服务已在运行")
-        return True
-    except Exception:
-        pass
-
-    logger.info("后端未运行，正在自动启动...")
-    backend_main = BACKEND_DIR / "main.py"
-    if not backend_main.exists():
-        logger.warning("找不到后端入口: %s", backend_main)
-        return False
-
-    subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
-        cwd=str(BACKEND_DIR),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(f"{BACKEND_URL}/health", timeout=1)
-            logger.info("后端服务启动成功")
-            return True
-        except Exception:
-            time.sleep(0.5)
-
-    logger.warning("后端服务启动超时（%.0fs），Dashboard 功能暂不可用", timeout)
-    return False
-
-
 def main() -> None:
-    _ensure_backend_running()
     create_app().launch(
         server_name="0.0.0.0",
         server_port=7860,
-        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
-        css=APP_CSS.replace("__WALLPAPER_URL__", WALLPAPER_URL),
         allowed_paths=[str(ASSETS_DIR)],
     )
 
