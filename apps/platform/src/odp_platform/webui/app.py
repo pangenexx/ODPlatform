@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -10,10 +13,9 @@ if __package__ in {None, ""}:
 import gradio as gr
 
 from odp_platform.common.logging_utils import get_logger
-from odp_platform.common.paths import LOGGING_DIR
+from odp_platform.common.paths import LOGGING_DIR, ROOT_DIR
 from odp_platform.webui.config_tab import create_config_ui
 from odp_platform.webui.dashboard import create_dashboard_ui
-from odp_platform.webui.dataset_analysis import create_dataset_analysis_ui
 from odp_platform.webui.dataset_browser import create_dataset_browser_ui
 from odp_platform.webui.model_demo import create_model_demo_ui
 from odp_platform.webui.training_tab import create_training_ui
@@ -28,7 +30,6 @@ from odp_platform.webui.validation_tab import create_validation_ui
 
 logger = logging.getLogger(__name__)
 
-ADMIN_PASSWORD = "0000"
 BACKEND_URL = "http://127.0.0.1:8000"
 BACKEND_DIR = ROOT_DIR / "apps" / "web-backend"
 
@@ -85,8 +86,9 @@ main.app,
 main.app > .wrap,
 main.app > .wrap > .contain,
 main.app > .wrap > .contain > .column {
-  width: 100vw !important;
-  max-width: none !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
   background: transparent !important;
@@ -97,10 +99,19 @@ footer {
   display: none !important;
 }
 
+/* ── 修复页面被右侧截断 ── */
+html, body, .gradio-container, main.app, main.app > .wrap,
+main.app > .wrap > .contain, main.app > .wrap > .contain > .column {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
 .odp-shell {
   position: relative !important;
   z-index: 1 !important;
-  width: 100vw !important;
+  width: 100% !important;
+  max-width: 100% !important;
   min-height: 100vh !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -126,43 +137,52 @@ footer {
   transition: left 180ms ease;
 }
 
+/* Gradio v6 layout overrides — minimal & safe */
 .tabs,
 .tabitem,
 .tabitem > .column,
 .tabitem > .column > .form,
-.form,
-.row,
-.column,
-.gap,
 .contain {
   min-width: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  overflow: visible !important;
 }
 
 .tabs {
   position: relative !important;
   z-index: 2 !important;
   display: block !important;
-  width: calc(100vw - var(--odp-sidebar)) !important;
-  max-width: calc(100vw - var(--odp-sidebar)) !important;
+  width: auto !important;
+  max-width: calc(100vw - var(--odp-sidebar) - 2px) !important;
   min-height: 100vh !important;
   margin-left: var(--odp-sidebar) !important;
-  padding: 122px var(--odp-content-pad-x) 56px !important;
-  transition: margin-left 180ms ease, width 180ms ease, max-width 180ms ease, padding 180ms ease;
+  padding: 122px 24px 56px !important;
+  transition: margin-left 180ms ease, padding 180ms ease;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
 }
 
 .tabitem {
   width: 100% !important;
   max-width: 100% !important;
+  min-width: 0 !important;
 }
 
-.block,
-.panel,
-.tabitem > .column > button,
-.odp-row > button {
+.tabitem > .column {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.tabitem .row,
+.tabitem .form {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+/* ── 卡片容器：只应用于显式卡片类，不全局匹配block ── */
+.odp-card-like,
+.odp-row > .block,
+.odp-row > .form > .block {
   color: var(--odp-text) !important;
   border: 1px solid var(--odp-line) !important;
   border-radius: var(--odp-radius) !important;
@@ -173,10 +193,12 @@ footer {
   -webkit-backdrop-filter: none !important;
 }
 
-.block:hover,
-.panel:hover,
-.block:focus-within,
-.panel:focus-within {
+.odp-card-like:hover,
+.odp-row > .block:hover,
+.odp-row > .form > .block:hover,
+.odp-card-like:focus-within,
+.odp-row > .block:focus-within,
+.odp-row > .form > .block:focus-within {
   outline: 0 !important;
   box-shadow: 0 12px 30px rgba(23, 24, 43, 0.055) !important;
 }
@@ -591,8 +613,7 @@ html.odp-sidebar-collapsed .tabs,
 html.odp-sidebar-collapsed .odp-admin-head,
 .odp-shell.odp-sidebar-collapsed .tabs,
 .odp-shell.odp-sidebar-collapsed .odp-admin-head {
-  width: calc(100vw - var(--odp-sidebar-mini)) !important;
-  max-width: calc(100vw - var(--odp-sidebar-mini)) !important;
+  width: auto !important;
   margin-left: var(--odp-sidebar-mini) !important;
 }
 
@@ -645,7 +666,10 @@ html.odp-sidebar-collapsed .odp-admin-head,
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
 }
 
-button {
+/* ── 普通按钮 ── */
+.odp-row button,
+.odp-admin-layer button,
+.odp-user-layer button {
   color: var(--odp-text) !important;
   border: 1px solid var(--odp-line) !important;
   border-radius: 14px !important;
@@ -656,11 +680,10 @@ button {
   transform: none !important;
 }
 
-button:hover,
-button:focus,
-button:focus-visible,
-button:not(.odp-sidebar-toggle):hover,
-button:not(.odp-sidebar-toggle):active {
+.odp-row button:hover,
+.odp-row button:focus,
+.odp-admin-layer button:hover,
+.odp-user-layer button:hover {
   outline: 0 !important;
   background: var(--odp-blue-soft) !important;
   color: var(--odp-blue) !important;
@@ -798,6 +821,81 @@ td {
   border-color: var(--odp-line) !important;
 }
 
+/* ── 表格强制白底黑字（覆盖Gradio深色主题）── */
+div.dataframe,
+div.table-wrap,
+div.dataframe table,
+div.table-wrap table,
+div.dataframe table thead,
+div.dataframe table tbody,
+div.dataframe table tr,
+div.dataframe table td,
+div.dataframe table th,
+div.table-wrap table thead,
+div.table-wrap table tbody,
+div.table-wrap table tr,
+div.table-wrap table td,
+div.table-wrap table th {
+  color: #17182b !important;
+  background: #ffffff !important;
+  border-color: #e7eaf2 !important;
+}
+
+div.dataframe table td,
+div.dataframe table th,
+div.table-wrap table td,
+div.table-wrap table th {
+  color: #17182b !important;
+  background-color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  padding: 10px 14px !important;
+  border-bottom: 1px solid #e7eaf2 !important;
+}
+
+div.dataframe table tr:nth-child(even) td {
+  background-color: #f0f2f8 !important;
+}
+
+div.dataframe table tr td:first-child {
+  font-weight: 700 !important;
+  color: #17182b !important;
+  background-color: #eef1ff !important;
+}
+
+div.dataframe {
+  border: 1px solid #e7eaf2 !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+}
+
+/* Chatbot 强制白底（覆盖Gradio 6.0深色主题） */
+div.chatbot,
+div[class*="chatbot"],
+div[class*="Chatbot"],
+div.chatbot > div,
+div[class*="chatbot"] > div,
+div[class*="Chatbot"] > div,
+div.chatbot .wrap,
+div.chatbot .message-wrap,
+div.chatbot .bot,
+div.chatbot .user,
+div.chatbot [class*="message"],
+div.chatbot [class*="Message"],
+div.chatbot .bot *,
+div.chatbot .user *,
+div.chatbot [class*="bot"] *,
+div.chatbot [class*="user"] *,
+.chatbot,
+[class*="chatbot"],
+[class*="Chatbot"],
+.chatbot * {
+  background: #ffffff !important;
+  color: #17182b !important;
+  border-color: #e7eaf2 !important;
+}
+
 .table-wrap th button,
 .table-container button,
 .dataframe button {
@@ -815,11 +913,11 @@ td {
   grid-template-columns: 1fr minmax(180px, 260px) !important;
   gap: 18px !important;
   align-items: end !important;
-  width: calc(100vw - var(--odp-sidebar)) !important;
-  max-width: calc(100vw - var(--odp-sidebar)) !important;
+  width: auto !important;
+  max-width: none !important;
   margin-left: var(--odp-sidebar) !important;
-  padding: 98px var(--odp-content-pad-x) 12px !important;
-  transition: margin-left 180ms ease, width 180ms ease, max-width 180ms ease !important;
+  padding: 98px 24px 12px !important;
+  transition: margin-left 180ms ease, padding 180ms ease !important;
 }
 
 .odp-admin-title {
@@ -929,91 +1027,99 @@ td {
 .odp-admin-modal {
   position: fixed !important;
   inset: 0 !important;
-  z-index: 20000 !important;
-  display: grid !important;
-  place-items: center !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   padding: 24px !important;
   border: 0 !important;
   border-radius: 0 !important;
-  background: rgba(248, 250, 255, 0.92) !important;
+  background: rgba(248, 250, 255, 0.85) !important;
   box-shadow: none !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  flex: unset !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  height: auto !important;
 }
 
-.odp-admin-modal .odp-modal-card {
-  width: min(390px, calc(100vw - 48px)) !important;
-  max-width: min(390px, calc(100vw - 48px)) !important;
-  padding: 20px !important;
-  gap: 12px !important;
+.odp-admin-modal.odp-modal-hidden {
+  display: none !important;
+}
+
+.odp-modal-card {
+  width: 390px !important;
+  max-width: calc(100vw - 48px) !important;
+  padding: 24px !important;
   border: 1px solid var(--odp-line) !important;
   border-radius: 22px !important;
   background: #ffffff !important;
   box-shadow: 0 28px 80px rgba(23, 24, 43, 0.13) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
-.odp-admin-modal .odp-modal-card,
-.odp-admin-modal .odp-modal-card > *,
-.odp-admin-modal .odp-modal-card > * > *,
-.odp-admin-modal .odp-modal-card > * > * > * {
-  background-color: transparent !important;
-}
-
-.odp-admin-modal .odp-modal-card {
-  background: #ffffff !important;
-}
-
-.odp-admin-modal .odp-modal-card .block,
-.odp-admin-modal .odp-modal-card .form,
-.odp-admin-modal .odp-modal-card .panel,
-.odp-admin-modal .odp-modal-card .wrap,
-.odp-admin-modal .odp-modal-card .wrap-inner,
-.odp-admin-modal .odp-modal-card .input-container,
-.odp-admin-modal .odp-modal-card .container.show_textbox_border {
-  min-height: 0 !important;
+.odp-modal-card .block,
+.odp-modal-card .form,
+.odp-modal-card .panel {
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+  min-height: 0 !important;
 }
 
-.odp-admin-modal .odp-modal-card .label-wrap {
-  padding: 0 0 8px !important;
+.odp-modal-card > div,
+.odp-modal-card > .form {
+  margin-bottom: 8px !important;
 }
 
-.odp-admin-modal input,
-.odp-admin-modal textarea,
-.odp-admin-modal .container.show_textbox_border {
+.odp-modal-card .label-wrap {
+  padding: 0 0 4px !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+}
+
+.odp-modal-card input,
+.odp-modal-card textarea {
   min-height: 44px !important;
-  border: 1px solid var(--odp-line) !important;
-  border-radius: 13px !important;
-  background: #ffffff !important;
-}
-
-.odp-admin-modal input,
-.odp-admin-modal textarea {
   padding: 0 14px !important;
-}
-
-.odp-admin-modal button {
-  min-height: 48px !important;
-  border-radius: 15px !important;
-}
-
-.odp-admin-modal button:not(.primary) {
+  border: 1px solid var(--odp-line) !important;
+  border-radius: 12px !important;
   background: #ffffff !important;
+  color: #17182b !important;
+  font-size: 16px !important;
 }
 
-.odp-admin-modal button.primary,
-.odp-admin-modal .primary button {
-  background: var(--odp-blue) !important;
+.odp-modal-card button {
+  min-height: 44px !important;
+  padding: 0 20px !important;
+  border-radius: 12px !important;
+  font-weight: 700 !important;
+}
+
+.odp-modal-card button:not(.primary) {
+  background: #f1f3fb !important;
+  color: #17182b !important;
+  border: 1px solid var(--odp-line) !important;
+}
+
+.odp-modal-card button.primary,
+.odp-modal-card .primary button {
+  background: #5368f6 !important;
   color: #ffffff !important;
+  border: 0 !important;
 }
 
 .odp-modal-actions {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  display: flex !important;
+  gap: 12px !important;
+  justify-content: flex-end !important;
+  margin-top: 16px !important;
+}
+
+.odp-modal-actions button {
+  flex: 1 !important;
 }
 
 @media (max-width: 1180px) {
@@ -1027,12 +1133,9 @@ td {
 
 @media (max-width: 820px) {
   .tabs,
-  html.odp-sidebar-collapsed .tabs,
-  .odp-admin-head,
-  html.odp-sidebar-collapsed .odp-admin-head {
-    width: calc(100vw - var(--odp-sidebar-mini)) !important;
-    max-width: calc(100vw - var(--odp-sidebar-mini)) !important;
+  .odp-admin-head {
     margin-left: var(--odp-sidebar-mini) !important;
+    width: auto !important;
     padding-left: 22px !important;
     padding-right: 22px !important;
   }
@@ -1065,43 +1168,76 @@ td {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Prevents layout shift from scrollbar */
+html { scrollbar-gutter: stable; }
+
+/* Layer visibility control - never use Gradio visible= toggle */
+.odp-layer-hidden { display: none !important; }
+
+/* Force all tab content containers to not overflow right */
+.tabitem .column:not(.odp-admin-modal),
+.tabitem .form,
+.tabitem .row,
+.tabitem .group,
+.tabitem > div,
+.tabitem [class*="Column"],
+.tabitem [class*="Row"] {
+  max-width: 100% !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+  overflow-wrap: break-word !important;
+  word-break: break-word !important;
+}
+
+/* Ensure Gradio tabs panel doesn't overflow */
+.tabitem {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+}
+
+/* Fix deeply nested Gradio containers */
+.contain,
+.wrap {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+/* JS layer control: hidden by default */
+.odp-layer-hidden { display: none !important; }
+
+/* ── 强制白底（覆盖Gradio 6.0深色主题） ── */
+body,
+html,
+.gradio-container,
+.gradio-container *,
+.dark,
+.dark *,
+[data-testid="dark"],
+[class*="dark"],
+body.dark,
+.gradio-container.dark {
+  color-scheme: light !important;
+  background: var(--odp-page) !important;
+  color: var(--odp-text) !important;
+  --background-fill-primary: #ffffff !important;
+  --background-fill-secondary: #f7f8fc !important;
+  --border-color-primary: #e7eaf2 !important;
+  --block-background-fill: #ffffff !important;
+  --block-border-color: #e7eaf2 !important;
+  --input-background-fill: #f1f3fb !important;
+  --input-border-color: transparent !important;
+}
+
+/* ── 禁止gradio图片全屏预览（不影响其他交互） ── */
+.image-container img {
+  max-width: 100% !important; max-height: 65vh !important;
+  width: auto !important; height: auto !important;
+  object-fit: contain !important;
+}
+
 """
-
-
-def _show_admin_dialog() -> tuple[gr.update, gr.update, gr.update]:
-    return gr.update(visible=True), gr.update(value=""), gr.update(value="")
-
-
-def _hide_admin_dialog() -> tuple[gr.update, gr.update, gr.update]:
-    return gr.update(visible=False), gr.update(value=""), gr.update(value="")
-
-
-def _try_enter_admin(password: str) -> tuple[gr.update, gr.update, gr.update, gr.update, gr.update]:
-    if (password or "").strip() == ADMIN_PASSWORD:
-        return (
-            gr.update(visible=False),
-            gr.update(visible=True),
-            gr.update(visible=False),
-            gr.update(value=""),
-            gr.update(value=""),
-        )
-    return (
-        gr.update(),
-        gr.update(),
-        gr.update(visible=True),
-        gr.update(value=""),
-        gr.update(value="密码错误"),
-    )
-
-
-def _return_user_mode() -> tuple[gr.update, gr.update, gr.update, gr.update, gr.update]:
-    return (
-        gr.update(visible=True),
-        gr.update(visible=False),
-        gr.update(visible=False),
-        gr.update(value=""),
-        gr.update(value=""),
-    )
 
 
 def _create_user_tabs() -> None:
@@ -1122,16 +1258,57 @@ def _create_admin_tabs() -> None:
     with gr.Tabs():
         with gr.TabItem("Dashboard"):
             create_dashboard_ui()
+        with gr.TabItem("图像检测"):
+            create_image_detection_ui()
+        with gr.TabItem("模型选择"):
+            create_model_selection_ui()
+        with gr.TabItem("模型演示"):
+            create_model_demo_ui()
         with gr.TabItem("数据集浏览"):
             create_dataset_browser_ui()
         with gr.TabItem("训练"):
             create_training_ui()
-        with gr.TabItem("模型演示"):
-            create_model_demo_ui()
         with gr.TabItem("数据校验"):
             create_validation_ui()
         with gr.TabItem("配置管理"):
             create_config_ui()
+
+
+_JS_SETUP = """
+<style>
+/* ── 管理员弹窗 ── */
+.odp-admin-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: rgba(248, 250, 255, 0.85) !important;
+}
+.odp-admin-modal.odp-modal-hidden { display: none !important; }
+</style>
+<script>
+(function(){
+  function restoreAdmin() {
+    if (localStorage.getItem('odp_admin') === '1') {
+      var u = document.querySelector('.odp-user-layer');
+      var a = document.querySelector('.odp-admin-layer');
+      if (u) u.classList.add('odp-layer-hidden');
+      if (a) a.classList.remove('odp-layer-hidden');
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', restoreAdmin);
+  } else {
+    restoreAdmin();
+  }
+})();
+</script>
+"""
 
 
 def create_app() -> gr.Blocks:
@@ -1145,9 +1322,8 @@ def create_app() -> gr.Blocks:
 
     with gr.Blocks(
         title="低空智瞰",
-        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
-        css=APP_CSS,
     ) as app:
+        gr.HTML(_JS_SETUP)
         with gr.Column(elem_classes=["odp-shell"]):
             gr.HTML(
                 """
@@ -1157,12 +1333,10 @@ def create_app() -> gr.Blocks:
                     aria-label="切换边栏"
                     aria-expanded="true"
                     onclick="
-                        const root = document.documentElement;
-                        const shell = document.querySelector('.odp-shell');
-                        const collapsed = shell
+                        var shell = document.querySelector('.odp-shell');
+                        var collapsed = shell
                             ? shell.classList.toggle('odp-sidebar-collapsed')
-                            : root.classList.toggle('odp-sidebar-collapsed');
-                        root.classList.toggle('odp-sidebar-collapsed', collapsed);
+                            : document.documentElement.classList.toggle('odp-sidebar-collapsed');
                         this.setAttribute('aria-expanded', String(!collapsed));
                     "
                 >☰</button>
@@ -1181,12 +1355,28 @@ def create_app() -> gr.Blocks:
                 """,
                 elem_classes=["odp-title"],
             )
-            with gr.Column(visible=True) as user_layer:
+            with gr.Column(visible=True, elem_classes=["odp-user-layer"]):
                 with gr.Row(elem_classes=["odp-mode-bar"]):
-                    admin_entry_btn = gr.Button("⚙️", elem_classes=["odp-gear-button"])
+                    gr.HTML(
+                        """
+                        <button type="button" class="odp-gear-button" style="
+                            flex:0 0 48px;width:48px;min-width:48px;max-width:48px;
+                            height:48px;min-height:48px;max-height:48px;padding:0;margin-left:auto;
+                            border:0;border-radius:14px;background:#f1f3fb;color:#70778a;
+                            font-size:20px;cursor:pointer;display:grid;place-items:center;
+                        "
+                        onclick="
+                            document.querySelector('.odp-admin-modal').classList.remove('odp-modal-hidden');
+                            var i = document.querySelector('.odp-admin-password input');
+                            if(i)i.value='';
+                            var e = document.querySelector('.odp-admin-error input');
+                            if(e)e.value='';
+                        ">⚙️</button>
+                        """,
+                    )
                 _create_user_tabs()
 
-            with gr.Column(visible=False, elem_classes=["odp-admin-layer"]) as admin_layer:
+            with gr.Column(visible=True, elem_classes=["odp-admin-layer", "odp-layer-hidden"]):
                 with gr.Row(elem_classes=["odp-admin-head"]):
                     gr.HTML(
                         """
@@ -1199,49 +1389,82 @@ def create_app() -> gr.Blocks:
                         """,
                         elem_classes=["odp-admin-title"],
                     )
-                    return_user_btn = gr.Button("返回用户模式")
+                    gr.HTML(
+                        """
+                        <button class="odp-return-user-btn" style="
+                            min-height:52px;padding:0 24px;
+                            border-radius:14px;border:1px solid var(--odp-line);
+                            background:var(--odp-card);color:var(--odp-text);
+                            font-weight:800;font-size:15px;cursor:pointer;
+                        "
+                         onclick="
+                             document.querySelector('.odp-user-layer').classList.remove('odp-layer-hidden');
+                             document.querySelector('.odp-admin-layer').classList.add('odp-layer-hidden');
+                             document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
+                             localStorage.setItem('odp_admin','0');
+                             var i = document.querySelector('.odp-admin-password input');
+                             if(i)i.value='';
+                             var e = document.querySelector('.odp-admin-error input');
+                             if(e)e.value='';
+                         ">返回用户模式</button>
+                        """,
+                    )
                 _create_admin_tabs()
 
-            with gr.Column(visible=False, elem_classes=["odp-admin-modal"]) as admin_dialog:
+            with gr.Column(elem_classes=["odp-admin-modal", "odp-modal-hidden"]):
                 with gr.Group(elem_classes=["odp-modal-card"]):
-                    admin_password = gr.Textbox(
+                    gr.Textbox(
                         label="管理员密码",
                         type="password",
                         placeholder="请输入密码",
                         max_lines=1,
+                        elem_classes=["odp-admin-password"],
                     )
-                    admin_error = gr.Textbox(
+                    gr.Textbox(
                         label="状态",
                         value="",
                         interactive=False,
                         max_lines=1,
+                        elem_classes=["odp-admin-error"],
                     )
                     with gr.Row(elem_classes=["odp-row", "odp-modal-actions"]):
-                        admin_cancel_btn = gr.Button("取消")
-                        admin_confirm_btn = gr.Button("进入", variant="primary")
-
-            admin_entry_btn.click(
-                fn=_show_admin_dialog,
-                outputs=[admin_dialog, admin_password, admin_error],
-            )
-            admin_cancel_btn.click(
-                fn=_hide_admin_dialog,
-                outputs=[admin_dialog, admin_password, admin_error],
-            )
-            admin_confirm_btn.click(
-                fn=_try_enter_admin,
-                inputs=[admin_password],
-                outputs=[user_layer, admin_layer, admin_dialog, admin_password, admin_error],
-            )
-            admin_password.submit(
-                fn=_try_enter_admin,
-                inputs=[admin_password],
-                outputs=[user_layer, admin_layer, admin_dialog, admin_password, admin_error],
-            )
-            return_user_btn.click(
-                fn=_return_user_mode,
-                outputs=[user_layer, admin_layer, admin_dialog, admin_password, admin_error],
-            )
+                        gr.HTML(
+                            """
+                            <button class="odp-admin-cancel-btn" style="
+                                flex:1;min-height:44px;padding:0 20px;
+                                border-radius:12px;border:1px solid var(--odp-line);
+                                background:#f1f3fb;color:#17182b;
+                                font-weight:700;font-size:15px;cursor:pointer;
+                            "
+                            onclick="
+                                document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
+                                var i = document.querySelector('.odp-admin-password input');
+                                if(i)i.value='';
+                                var e = document.querySelector('.odp-admin-error input');
+                                if(e)e.value='';
+                            ">取消</button>
+                            <button class="odp-admin-confirm-btn" style="
+                                flex:1;min-height:44px;padding:0 20px;
+                                border-radius:12px;border:0;
+                                background:#5368f6;color:#ffffff;
+                                font-weight:700;font-size:15px;cursor:pointer;
+                            "
+                        onclick="
+                            var i = document.querySelector('.odp-admin-password input');
+                            var e = document.querySelector('.odp-admin-error input');
+                            var v = i ? i.value : '';
+                            if(v === '0000') {
+                                document.querySelector('.odp-user-layer').classList.add('odp-layer-hidden');
+                                document.querySelector('.odp-admin-layer').classList.remove('odp-layer-hidden');
+                                document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
+                                localStorage.setItem('odp_admin','1');
+                                if(e)e.value='';
+                            } else {
+                                if(e)e.value='密码错误';
+                            }
+                        ">进入</button>
+                            """,
+                        )
     return app
 
 
@@ -1282,9 +1505,12 @@ def _ensure_backend_running(timeout: float = 10.0) -> bool:
 
 
 def main() -> None:
+    import threading
+    threading.Thread(target=_ensure_backend_running, daemon=True).start()
     create_app().launch(
         server_name="0.0.0.0",
         server_port=7860,
+        css=APP_CSS,
         allowed_paths=[str(ASSETS_DIR)],
     )
 

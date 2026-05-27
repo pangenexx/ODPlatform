@@ -1,117 +1,144 @@
+#!/usr/bin/env python
+"""odp-infer CLI entry point — mirrors odp-train structure.
+
+Usage:
+  odp-infer --source 0                       # camera
+  odp-infer --source demo.mp4                # video
+  odp-infer --source test.jpg                # single image
+  odp-infer --source ./images/               # image folder
+  odp-infer --source 0 --show                # camera + display window
+  odp-infer --source demo.mp4 --conf 0.5     # override confidence
+  odp-infer --source 0 --no-viz              # disable beautify
+  odp-infer --source demo.mp4 --no-save      # run only, no output
+  odp-infer --pipeline-yaml my_pipe.yaml     # custom pipeline config
+"""
+from __future__ import annotations
+
 import argparse
-import json
-from pathlib import Path
-from typing import Optional
+import logging
+import sys
 
-import cv2
-
-from odp_platform.inference.engine import Detector
-from odp_platform.inference.visualizer import draw_detections
-from odp_platform.inference.sources import ImageSource, VideoWriter
-from odp_platform.inference.utils import detections_to_json
+from odp_platform.inference import InferService
 from odp_platform.common.logging_utils import get_logger
 from odp_platform.common.paths import LOGGING_DIR
 
-logger = get_logger(base_path=LOGGING_DIR, log_type="infer", logger_name="odp-infer")
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="odp-infer",
+        description="YOLO inference — frame_source capture + ultralytics inference + visualization",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  odp-infer --source 0                       # camera
+  odp-infer --source demo.mp4                # video
+  odp-infer --source test.jpg                # single image
+  odp-infer --source ./images/               # image folder
+  odp-infer --source 0 --show                # camera + display window
+  odp-infer --source 0 --threaded            # threaded pipeline
+  odp-infer --source demo.mp4 --conf 0.5     # override confidence
+  odp-infer --source 0 --no-viz              # disable beautify
+  odp-infer --source demo.mp4 --no-save      # run only, no output
+  odp-infer --pipeline-yaml my_pipe.yaml     # custom pipeline config
+        """,
+    )
+
+    # config files
+    parser.add_argument("--yaml", type=str, default=None,
+                        help="D5 infer.yaml path (YOLO predict params; default: RUNTIME_CONFIGS_DIR/infer.yaml)")
+    parser.add_argument("--pipeline-yaml", dest="pipeline_yaml", type=str, default=None,
+                        help="frame_source + visualization pipeline config path")
+
+    # inference params (override defaults)
+    parser.add_argument("--source", type=str, help="input source: image/video/dir/camera id")
+    parser.add_argument("--model", type=str, help="model path/name")
+    parser.add_argument("--conf", type=float, help="confidence threshold")
+    parser.add_argument("--iou", type=float, help="NMS IoU threshold")
+    parser.add_argument("--imgsz", type=int, help="input image size")
+    parser.add_argument("--device", type=str, help="inference device (0/cpu/0,1)")
+    parser.add_argument("--max-det", dest="max_det", type=int, help="max detections per image")
+    parser.add_argument("--classes", type=int, nargs="+", help="class IDs to detect")
+    parser.add_argument("--experiment-name", dest="experiment_name", type=str,
+                        help="experiment name (output goes to runs/infer/<experiment_name>/)")
+    parser.add_argument("--show", dest="show", action="store_true", default=None,
+                        help="display window (requires GUI)")
+    parser.add_argument("--no-save", dest="save", action="store_false", default=None,
+                        help="don't save results to disk")
+
+    # service-level options
+    parser.add_argument("--threaded", action="store_true",
+                        help="threaded pipeline (camera/RTSP recommended)")
+    parser.add_argument("--warmup", dest="warmup_frames", type=int, default=0,
+                        help="threaded: discard first N frames for camera warmup")
+    parser.add_argument("--window-name", dest="window_name", type=str, default="odp-infer",
+                        help="display window title")
+    parser.add_argument("--no-viz", dest="beautify", action="store_false", default=True,
+                        help="disable beautify visualization")
+    parser.add_argument("--no-info", dest="show_info", action="store_false", default=True,
+                        help="disable HUD overlay (FPS/frame count etc.)")
+    parser.add_argument("--no-rename-log", dest="rename_log", action="store_false", default=True,
+                        help="don't rename log file to <experiment>.log")
+
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="log level")
+
+    return parser
 
 
-def run_inference(args):
-    model_path = args.model
-    input_path = args.input
-    output_path = args.output
-    conf = args.conf
-    iou = args.iou
-    
-    logger.info(f"加载模型: {model_path}")
-    detector = Detector(model_path, conf=conf, iou=iou)
-    
-    logger.info(f"处理输入: {input_path}")
-    source = ImageSource(input_path)
-    
-    if output_path:
-        output_dir = Path(output_path)
-        output_dir.mkdir(parents=True, exist_ok=True)
-    
-    video_writer = None
-    if source.cap is not None:
-        fps = source.get_fps() or 30.0
-        video_output = Path(output_path) / "output.mp4" if output_path else "output.mp4"
-        video_writer = VideoWriter(str(video_output), fps=fps)
-    
-    frame_count = 0
-    for image in source:
-        result = detector.detect(image)
-        annotated = draw_detections(image, result.detections)
-        
-        if video_writer:
-            video_writer.write(annotated)
-        else:
-            if output_path:
-                output_file = output_dir / f"detection_{frame_count:04d}.jpg"
-                cv2.imwrite(str(output_file), cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
-            
-            detections_json = detections_to_json(result.detections)
-            print(json.dumps({
-                "frame": frame_count,
-                "inference_ms": round(result.inference_ms, 2),
-                "detections": detections_json
-            }, indent=2, ensure_ascii=False))
-        
-        frame_count += 1
-    
-    source.release()
-    if video_writer:
-        video_writer.release()
-    
-    logger.info(f"推理完成，共处理 {frame_count} 帧")
+def _setup_logging(log_level: str) -> None:
+    get_logger(
+        base_path=LOGGING_DIR,
+        log_type="infer",
+        log_level=getattr(logging, log_level),
+        temp_log=False,
+    )
 
 
-def run_benchmark(args):
-    from odp_platform.inference.benchmark import benchmark_detector
-
-    model_path = args.model
-    image_path = args.image
-    iterations = args.iterations
-
-    logger.info(f"加载模型: {model_path}")
-    detector = Detector(model_path)
-
-    image = cv2.imread(image_path)
-    if image is None:
-        logger.error(f"无法读取图片: {image_path}")
-        return
-    
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    test_images = [image] * 10
-    
-    result = benchmark_detector(detector, test_images, benchmark_runs=iterations)
-    
-    print(json.dumps(result.to_dict(), indent=2))
-
-
-def main():
-    parser = argparse.ArgumentParser(prog="odp-infer", description="ODPlatform 推理工具")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    
-    detect_parser = subparsers.add_parser("detect", help="执行目标检测")
-    detect_parser.add_argument("--model", "-m", required=True, help="模型路径")
-    detect_parser.add_argument("--input", "-i", required=True, help="输入图片/视频/目录/摄像头")
-    detect_parser.add_argument("--output", "-o", help="输出目录")
-    detect_parser.add_argument("--conf", type=float, default=0.25, help="置信度阈值")
-    detect_parser.add_argument("--iou", type=float, default=0.45, help="IOU阈值")
-    
-    benchmark_parser = subparsers.add_parser("benchmark", help="基准测试")
-    benchmark_parser.add_argument("--model", "-m", required=True, help="模型路径")
-    benchmark_parser.add_argument("--image", "-i", required=True, help="测试图片")
-    benchmark_parser.add_argument("--iterations", "-n", type=int, default=50, help="测试次数")
-    
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
-    
-    if args.command == "detect":
-        run_inference(args)
-    elif args.command == "benchmark":
-        run_benchmark(args)
+
+    _setup_logging(args.log_level)
+    log = logging.getLogger("odp_platform.cli.infer")
+
+    NON_CONFIG_KEYS = {
+        "yaml", "pipeline_yaml", "beautify", "rename_log", "log_level",
+        "threaded", "warmup_frames", "window_name", "show_info",
+    }
+    cli_args = {
+        k: v for k, v in vars(args).items()
+        if v is not None and k not in NON_CONFIG_KEYS
+    }
+
+    log.info(f"starting odp-infer, CLI fields: {list(cli_args.keys())}")
+    try:
+        service = InferService()
+        result = service.predict(
+            yaml_path=args.yaml,
+            pipeline_yaml=args.pipeline_yaml,
+            cli_args=cli_args,
+            beautify=args.beautify,
+            rename_log=args.rename_log,
+            threaded=args.threaded,
+            warmup_frames=args.warmup_frames,
+            window_name=args.window_name,
+            show_info=args.show_info,
+        )
+    except KeyboardInterrupt:
+        log.warning("user interrupt (Ctrl+C)")
+        return 130
+    except Exception as e:
+        log.error(f"unexpected exception: {e}", exc_info=True)
+        return 1
+
+    if result.success:
+        log.info(f"OK. time={result.infer_time:.2f}s, output={result.output_dir}")
+        return 0
+    else:
+        log.error(f"inference failed: {result.error}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

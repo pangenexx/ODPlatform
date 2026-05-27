@@ -1,0 +1,40 @@
+# ── 帧源捕获 + 美化 流水线配置 ──
+# 这份是手写维护的，装 YOLO predict 参数之外的配置:
+#   frame_source: 摄像头参数（source 是摄像头数字 ID 时生效）
+#   visualization: 中文标签映射、颜色、风格
+
+# 帧源捕获 (frame_source)
+frame_source:
+  # camera 块: 仅当 source 是摄像头(如 "0")时生效
+  camera:
+    width: 1280
+    height: 720
+    fps: 30
+    backend: msmf         # auto / msmf(Win高帧率) / dshow(Win兼容) / v4l2(Linux)
+    codec: MJPG
+
+# 美化绘制 (visualization)
+visualization:
+  enabled: true
+  use_label_mapping: true
+
+  # 英文类别名 → 中文显示名
+  label_mapping:
+    aircraft: 飞机
+    oiltank: 油罐
+    overpass: 立交桥
+    playground: 操场
+
+  # 类别框颜色 (BGR 格式)
+  color_mapping:
+    aircraft: [0, 255, 0]
+    oiltank: [255, 0, 0]
+    overpass: [0, 0, 255]
+    playground: [129, 229, 252]
+
+  default_color: [0, 255, 0]
+  font_path: null
+
+  # 风格覆盖（不写则自适应）
+  style:
+    text_color: [255, 255, 255]

@@ -87,21 +87,10 @@ class ValService:
         self.project_dir = Path(project_dir) if project_dir else (RUNS_DIR / "val")
 
     def _generate_experiment_name(self, prefix: str, model_stem: str) -> str:
-        """生成自动递增的实验名称。
-
-        命名格式: {prefix}-{counter}-{timestamp}-{model_stem}
-        例如: val-1-20260526-174500-yolo11n
-
-        递增规则: 扫描 self.project_dir 下已有 {prefix}-* 数量 + 1
-        此格式确保:
-          1) 每次运行有唯一名称（timestamp 保证）
-          2) 实验次数一目了然（counter 递增）
-          3) 知道用了什么模型（model_stem 在名称中）
-        """
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         existing = list(self.project_dir.glob(f"{prefix}-*"))
         counter = len(existing) + 1
-        return f"{prefix}-{counter}-{timestamp}-{model_stem}"
+        return f"{prefix}-{counter}_{timestamp}_{model_stem}"
 
     def validate(
         self,

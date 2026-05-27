@@ -27,13 +27,34 @@ odp-webui
 | `odp-init` | 初始化项目目录 | [命令速查](ODPlatform_命令速查.md#二项目初始化-odp-init) |
 | `odp-reset` | 安全重置运行时产物 | [命令速查](ODPlatform_命令速查.md#三项目重置-odp-reset) |
 | `odp-transform` | 端到端数据转换+划分+yaml | [命令速查](ODPlatform_命令速查.md#四数据格式转换与划分-odp-transform) |
-| `odp-trans` | 旧版单步格式转换 | [命令速查](ODPlatform_命令速查.md#五旧版单步转换-odp-trans--兼容保留) |
 | `odp-validate` | 数据集校验与分析 | [命令速查](ODPlatform_命令速查.md#六数据校验-odp-validate) |
+| `odp-gen-config` | 生成配置模板 | [命令速查](#) |
 | `odp-train` | 模型训练 | [命令速查](ODPlatform_命令速查.md#十训练-odp-train) |
 | `odp-val` | 模型评估 | [命令速查](ODPlatform_命令速查.md#十一评估-odp-val) |
-| `odp-infer` | 模型推理 | [命令速查](ODPlatform_命令速查.md#十二推理-odp-infer) |
+| `odp-infer detect` | 模型推理（图片/视频） | [命令速查](ODPlatform_命令速查.md#十二推理-odp-infer) |
+| `odp-infer live` | **实时推理（摄像头/RTSP）** | 画面显示FPS/帧数/检测数信息面板 |
+| `odp-infer benchmark` | **模型基准测试** | 测试模型推理速度 |
 | **`odp-webui`** | **启动 Gradio Web 前端** | [命令速查](ODPlatform_命令速查.md#六webui--gradio-前端) |
 | **`odp-backend`** | **启动 FastAPI 后端（单独）** | [命令速查](ODPlatform_命令速查.md#六webui--gradio-前端) |
+
+### 实时推理
+
+摄像头或 RTSP 流实时检测，带信息面板（FPS/推理耗时/帧数/检测数）：
+
+```bash
+# 默认摄像头
+odp-infer live --model runs/train/exp/weights/best.pt
+
+# 指定摄像头编号（0,1,2...）并配置参数
+odp-infer live --model best.pt --source 0 --display-width 1280 --display-height 720 --camera-fps 60
+
+# RTSP 网络流
+odp-infer live --model best.pt --source rtsp://192.168.1.100:554/stream1
+
+# 图片/视频检测
+odp-infer detect --model best.pt --input test.jpg --output results/
+odp-infer detect --model best.pt --input video.mp4 --output results/
+```
 
 ## WebUI — 可视化操作界面
 
@@ -81,7 +102,18 @@ ODPlatform/
 │       ├── data_validation/    数据校验
 │       ├── training/           模型训练
 │       ├── evaluation/         模型评估
-│       ├── inference/          模型推理（engine.py + visualizer.py）
+│       ├── inference/              模型推理（D8 推理子系统）
+│       │   ├── __init__.py         公共 API（Detector、InferService、InferStats…）
+│       │   ├── engine.py           推理引擎（Detector）
+│       │   ├── service.py          推理服务编排（InferService，对标 odp-train）
+│       │   ├── pipeline_config.py  帧源+美化 YAML 配置加载
+│       │   ├── sources.py          输入源（图片/视频/摄像头/RTSP）
+│       │   ├── frame_source/       统一帧输入源（摄像头配置/多线程/覆盖层）
+│       │   │   ├── overlay.py      画面信息叠加（FPS、帧数、推理耗时）
+│       │   │   └── sources/        各输入源实现（Camera/Video/Image）
+│       │   ├── visualizer.py       检测结果绘制 + 信息面板
+│       │   ├── benchmark.py        性能基准测试
+│       │   └── utils.py            辅助工具
 │       ├── webui/              Gradio 前端（6 个 Tab）
 │       │   ├── app.py          入口，自动启动后端
 │       │   ├── dashboard.py / model_demo.py / dataset_browser.py
@@ -134,8 +166,11 @@ odp-train --model yolo11n.pt --data configs\datasets\RSOD.yaml --epochs 100
 # 5. 评估
 odp-val --model data\runs\train\exp\weights\best.pt --data configs\datasets\RSOD.yaml
 
-# 6. 推理
-odp-infer --model best.pt --source data\test\images
+# 6. 推理（图片/视频/摄像头）
+odp-infer --model best.pt --source data/test/images       # 图片文件夹
+odp-infer --model best.pt --source demo.mp4 --conf 0.5    # 视频（覆盖置信度）
+odp-infer --model best.pt --source 0 --show               # 摄像头实时检测
+odp-infer --model best.pt --source 0 --threaded --show    # 摄像头 + 多线程流水线
 
 # 7. WebUI 可视化
 odp-webui

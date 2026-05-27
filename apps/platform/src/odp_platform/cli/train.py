@@ -104,6 +104,22 @@ def _collect_cli_overrides(args) -> dict:
     return overrides
 
 
+def _generate_experiment_name(model_arg: str | None) -> str:
+    model_stem = "yolo"
+    if model_arg:
+        stem = Path(model_arg).stem
+        if stem:
+            model_stem = stem
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    experiments_dir = RUNS_DIR / "experiments"
+    if experiments_dir.exists():
+        existing = list(experiments_dir.glob("train-*"))
+        counter = len(existing) + 1
+    else:
+        counter = 1
+    return f"train-{counter}_{timestamp}_{model_stem}"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -111,7 +127,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     get_logger(base_path=LOGGING_DIR, log_type="train", log_level=logging.INFO,
                logger_name="odp-train")
 
-    experiment_name = args.name or f"train_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    experiment_name = args.name or _generate_experiment_name(args.model)
     dataset = args.dataset
     task_type = args.task
 

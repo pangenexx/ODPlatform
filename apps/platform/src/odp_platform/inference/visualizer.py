@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
-from typing import List
+from typing import List, Optional, Dict, Tuple
 
 from .engine import Detection
+from .frame_source.overlay import FPSCounter, Metrics, draw_hud
 
 
 def draw_detections(image: np.ndarray, detections: List[Detection], color_map: dict = None) -> np.ndarray:
@@ -91,3 +92,22 @@ def draw_confidence_histogram(detections: List[Detection], width: int = 400, hei
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
     return histogram
+
+
+def draw_info_panel(
+    image: np.ndarray,
+    fps: float = 0.0,
+    infer_ms: float = 0.0,
+    frame_index: int = 0,
+    num_detections: int = 0,
+    resolution: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """在画面左上角绘制半透明信息面板。"""
+    return draw_hud(
+        image=image,
+        loop_fps=fps,
+        infer_ms=infer_ms,
+        frame_index=frame_index,
+        num_detections=num_detections,
+        resolution=resolution,
+    )

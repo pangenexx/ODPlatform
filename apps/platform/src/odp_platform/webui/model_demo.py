@@ -8,14 +8,10 @@ import gradio as gr
 from odp_platform.webui.utils import list_model_files
 
 
-def _model_dropdown_choices(models: list[str]) -> list[tuple[str, str]]:
-    return [(Path(model_path).name, model_path) for model_path in models]
-
-
 def _refresh_models():
     models = list_model_files()
     return gr.update(
-        choices=_model_dropdown_choices(models),
+        choices=models,
         value=models[0] if models else None,
         interactive=True,
     )
@@ -57,7 +53,12 @@ def _run_inference(
     try:
         detector.conf = float(conf)
         detector.iou = float(iou)
-        image_np = np.array(image)
+        if isinstance(image, np.ndarray):
+            image_np = image
+        else:
+            image_np = np.array(image)
+        if image_np.size == 0:
+            return None, [], "图片数据为空"
         result = detector.detect(image_np)
         vis = draw_detections(image_np, result.detections)
         rows = [
@@ -76,16 +77,15 @@ def _run_inference(
 
 def create_model_demo_ui() -> None:
     models = list_model_files()
-    model_options = _model_dropdown_choices(models)
     detector_state = gr.State(None)
 
     with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
         refresh_btn = gr.Button("刷新")
         model_dd = gr.Dropdown(
             label="模型",
-            choices=model_options,
+            choices=models,
             value=models[0] if models else None,
-            filterable=False,
+            filterable=True,
             interactive=True,
         )
         load_btn = gr.Button("加载", variant="primary")
@@ -101,8 +101,8 @@ def create_model_demo_ui() -> None:
         conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
         iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        image_in = gr.Image(type="pil", label="输入")
-        image_out = gr.Image(type="numpy", label="结果")
+        image_in = gr.Image(type="numpy", label="输入", sources=["upload"])
+        image_out = gr.Image(type="numpy", label="结果", container=True)
     infer_btn = gr.Button("推理", interactive=False)
     json_out = gr.JSON(label="检测列表")
 

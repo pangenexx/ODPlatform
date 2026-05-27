@@ -28,6 +28,10 @@ Thumbs.db
 # Data - ignore large/runtime subdirectories (individual rules to allow LFS tracking)
 /data/raw/
 /data/train/
+
+# CLI generated configs
+apps/platform/configs/*_config.yaml
+apps/platform/configs/*_config.yml
 /data/val/
 /data/test/
 /data/runs/
@@ -79,7 +83,13 @@ coverage.xml
 
 # Teaching / student docs (not for main repo)
 docs/teaching/
+docs/拓展/
 【*/
 
 # Web backend uploads (runtime user data)
 apps/web-backend/uploads/
+
+# Model weights (not tracked in git)
+*.pt
+*.pth
+*.onnx
