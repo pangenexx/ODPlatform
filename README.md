@@ -179,3 +179,61 @@ odp-webui
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🧪 给测试人员的操作指南
+
+### 环境准备（新机器）
+
+```bash
+# 1. 克隆仓库（仅 main 分支）
+git clone https://github.com/wuwo1979/ODPlatform.git
+cd ODPlatform
+
+# 2. 创建环境
+conda create -n odp-gpu python=3.12 -y
+conda activate odp-gpu
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# 3. 安装项目
+pip install -e ./apps/platform
+
+# 4. 初始化目录
+odp-init
+```
+
+### 启动测试
+
+```bash
+# 一键启动 WebUI（推荐）
+odp-webui
+# 浏览器打开 http://localhost:7860
+# 首次启动会自动安装 Gradio 依赖，稍等 10-20 秒
+```
+
+### 功能测试点（按顺序）
+
+| 序号 | 测试项 | 操作步骤 | 预期结果 |
+|------|--------|---------|---------|
+| 1 | **首页/导航** | 打开 http://localhost:7860 | 看到左侧导航栏（仪表盘/图像检测/模型选择等），点击 "低空智瞰" logo 回到首页 |
+| 2 | **单图检测** | 图像检测 Tab → 选模型 → 上传图片 → 点"开始检测" | 右侧显示带检测框的图片 + 下方 JSON 列表 |
+| 3 | **Web 摄像头** | 图像检测 Tab → 点击摄像头画面 → 允许权限 | 画面出现后自动逐帧推理，叠加检测框 + FPS 信息 |
+| 4 | **服务器摄像头（OpenCV）** | 展开"服务器摄像头" → 点"启动" | 画面显示实时检测结果，左上角有 FPS/检测数/推理耗时面板 |
+| 5 | **管理员模式** | 点击右下 ⚙️ → 输入密码 `0000` | 进入管理员面板，显示 8 个 Tab（Dashboard/训练/配置管理等） |
+| 6 | **训练** | 管理员 → 训练 Tab → 选数据集 → 调参 → 开始训练 | 实时输出训练日志，训练结束后下方"训练结果可视化"显示 Loss/mAP 曲线 |
+| 7 | **LLM 对话** | 用户模式 → LLM对话 → 填 API Key + 模型名 → 发送消息 | 返回 AI 回复 |
+| 8 | **数据集浏览** | 管理员 → 数据集浏览 → 选数据集 | 显示图片缩略图 + 标注框 |
+
+### 常见问题
+
+```bash
+# 端口被占用
+odp-webui --port 7861
+
+# 单独启动后端（如果 WebUI 的后端没启动成功）
+odp-backend
+
+# 清除所有运行时数据
+odp-reset --yes --force
+```
