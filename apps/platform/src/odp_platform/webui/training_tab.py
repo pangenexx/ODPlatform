@@ -16,6 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from PIL import Image
 
 from odp_platform.common.paths import ROOT_DIR, RUNS_DIR
 from odp_platform.webui.utils import list_dataset_names, platform_env
@@ -413,6 +414,60 @@ def _summarize_experiment(experiment: str) -> str:
     return "\n".join(lines)
 
 
+def _get_pregen_image_safe(experiment: str, filename: str) -> Image.Image:
+    img_path = RUNS_DIR / "experiments" / experiment / filename
+    if img_path.exists():
+        try:
+            return Image.open(img_path)
+        except Exception:
+            pass
+    return Image.new("RGB", (400, 300), (240, 240, 240))
+
+
+def _load_admin_experiment_data(experiment: str) -> tuple:
+    if not experiment:
+        bl = Image.new("RGB", (400, 300), (240, 240, 240))
+        return (bl, bl, bl, bl, bl, bl, bl, "请选择实验")
+
+    rp = _get_pregen_image_safe(experiment, "results.png")
+    cm = _get_pregen_image_safe(experiment, "confusion_matrix.png")
+    cn = _get_pregen_image_safe(experiment, "confusion_matrix_normalized.png")
+    lb = _get_pregen_image_safe(experiment, "labels.jpg")
+    pr = _get_pregen_image_safe(experiment, "BoxPR_curve.png")
+    f1 = _get_pregen_image_safe(experiment, "BoxF1_curve.png")
+
+    rows = _load_results_csv(experiment)
+    bc = Image.new("RGB", (400, 300), (240, 240, 240))
+    if rows:
+        last = rows[-1]
+        metrics_map = [
+            ("mAP50", float(last.get("metrics/mAP50(B)", 0))),
+            ("mAP50-95", float(last.get("metrics/mAP50-95(B)", 0))),
+            ("Precision", float(last.get("metrics/precision(B)", 0))),
+            ("Recall", float(last.get("metrics/recall(B)", 0))),
+        ]
+        names = [m[0] for m in metrics_map]
+        values = [m[1] for m in metrics_map]
+        fig, ax = plt.subplots(figsize=(8, 4))
+        colors = ["#e67e22", "#9b59b6", "#2ecc71", "#e74c3c"]
+        bars = ax.bar(names, values, color=colors, width=0.5, edgecolor="white")
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                    f"{val:.4f}", ha="center", va="bottom", fontsize=11, fontweight="bold")
+        ax.set_ylim(0, max(values) * 1.25 if max(values) > 0 else 1)
+        ax.set_ylabel("Value")
+        ax.set_title(f"Best Metrics — {experiment}")
+        ax.grid(True, alpha=0.3, axis="y")
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        buf.seek(0)
+        plt.close(fig)
+        bc = Image.open(buf)
+
+    return (rp, cm, cn, lb, pr, f1, bc, _summarize_experiment(experiment))
+
+
 def create_training_ui() -> None:
     datasets = list_dataset_names()
     batch_hint = _auto_batch_hint("yolo11n.pt", 640)
@@ -502,6 +557,8 @@ def create_training_ui() -> None:
     gr.Markdown("---")
     gr.Markdown("### 训练结果可视化")
     experiments = _list_experiments()
+    blank = Image.new("RGB", (400, 300), (240, 240, 240))
+
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         exp_dd = gr.Dropdown(
             label="选择实验",
@@ -511,23 +568,27 @@ def create_training_ui() -> None:
             interactive=True,
         )
         refresh_exp_btn = gr.Button("刷新实验列表")
-    summary_box = gr.Textbox(label="实验摘要", lines=8, interactive=False)
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        loss_curve = gr.Plot(label="Loss 曲线")
-        metric_curve = gr.Plot(label="mAP / Precision / Recall 曲线")
-    with gr.Row(elem_classes=["odp-row"]):
-        metric_bar = gr.Plot(label="最佳指标柱状图")
+    exp_summary = gr.Textbox(label="实验摘要", lines=6, interactive=False)
+
+    with gr.Tabs():
+        with gr.TabItem("训练曲线"):
+            exp_results = gr.Image(value=blank, label="Loss + 验证指标", container=True, height=380)
+            exp_bar = gr.Image(value=blank, label="最佳指标柱状图", container=True, height=300)
+        with gr.TabItem("评估矩阵"):
+            exp_confusion = gr.Image(value=blank, label="混淆矩阵", container=True, height=340)
+            exp_confusion_norm = gr.Image(value=blank, label="归一化混淆矩阵", container=True, height=340)
+            exp_pr = gr.Image(value=blank, label="PR 曲线", container=True, height=300)
+            exp_f1 = gr.Image(value=blank, label="F1 曲线", container=True, height=300)
+        with gr.TabItem("类别分布"):
+            exp_labels = gr.Image(value=blank, label="类别分布", container=True, height=400)
 
     refresh_exp_btn.click(
         fn=lambda: gr.update(choices=_list_experiments()),
         outputs=[exp_dd],
     )
     exp_dd.change(
-        fn=_summarize_experiment,
+        fn=_load_admin_experiment_data,
         inputs=[exp_dd],
-        outputs=[summary_box],
-    ).then(
-        fn=_plot_training_curves,
-        inputs=[exp_dd],
-        outputs=[loss_curve, metric_curve, metric_bar],
+        outputs=[exp_results, exp_confusion, exp_confusion_norm,
+                 exp_labels, exp_pr, exp_f1, exp_bar, exp_summary],
     )
