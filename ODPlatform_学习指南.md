@@ -1,874 +1,771 @@
 # ODPlatform - 全流程学习指南
 
-> 作者: MuU | 目标: 从零掌握目标检测全栈开发技术路径
-> 版本: v2.0 (全面审计修正版)
-> **命令速查请见**：[ODPlatform_命令速查.md](ODPlatform_命令速查.md)
+> 作者: MuU | 目标: 从零掌握目标检测全栈开发技术路径  
+> 版本: v3.0 — 基于五层架构 + 答辩视角  
+> **命令速查**：[ODPlatform_命令速查.md](ODPlatform_命令速查.md)  
+> **答辩演练**：[ODPlatform_答辩演练问题集.md](docs/ODPlatform_答辩演练问题集.md)
 
 ---
 
-## 1. 项目全景概览
+## 第零章：一句话定义
 
-### 1.1 这是什么项目？
-
-ODPlatform 是一个**基于 YOLO 的多格式目标检测开发平台**，覆盖从数据处理到模型推理的完整流程。
-
-```
-数据输入 → 格式转换 → 数据校验 → 模型训练 → 模型评估 → 模型推理
-  VOC/COCO   YOLO格式    验证清洗    YOLO训练   mAP计算    单图/批量
-  LabelMe    统一管理      可视化     调参       结果分析    流水线
-```
-
-核心特点：
-- **双入口**：CLI 命令 + Gradio WebUI（用户/管理员双模式）
-- **双后端**：FastAPI + SQLite 后端（可选）用于持久化训练/推理记录
-- **模块化架构**：CLI 直调各业务模块，无中间抽象层
-- **渐进演进**：Stage 0 (marker) → Stage 1 (apps/platform 单体) → Stage 2 (前后端分离)
-
-### 1.2 完整目录结构
-
-```
-ODPlatform/
-├── apps/
-│   ├── platform/                    ← 核心引擎（全量代码）
-│   │   ├── configs/datasets/          数据集 YAML 配置
-│   │   ├── logging/                   运行时日志
-│   │   ├── src/odp_platform/
-│   │   │   ├── _version.py            版本号（单一数据源）
-│   │   │   ├── common/                基础设施（路径/日志/性能/常量）
-│   │   │   ├── data_pipeline/         数据格式转换 + 数据集划分
-│   │   │   ├── data_validation/       数据质量校验
-│   │   │   ├── training/              模型训练（experiment + hooks + recipe）
-│   │   │   ├── evaluation/            模型评估
-│   │   │   ├── inference/             模型推理（engine + visualizer + frame_source）
-│   │   │   ├── run_config/            配置管理（loader/merger/validator/schema）
-│   │   │   ├── webui/                 Gradio 前端
-│   │   │   └── cli/                   10 个 CLI 入口命令
-│   │   └── pyproject.toml             构建配置 + [project.scripts]
-│   │
-│   └── web-backend/                  ← FastAPI 后端（可选）
-│       ├── main.py                     FastAPI app
-│       ├── api/                        API 路由（experiments/detection/models/auth...）
-│       ├── db/                         数据库（SQLite + SQLAlchemy）
-│       ├── schemas.py                  Pydantic 数据模型
-│       └── hooks.py                    废弃（转用 training/callbacks.py）
-│
-├── data/                            ← 数据集/模型/运行产物（gitignore）
-│   ├── raw/                            原始标注数据
-│   ├── models/checkpoints/             训练好的 .pt 权重
-│   ├── runs/experiments/               训练实验产物
-│   └── ...
-├── docs/architecture/               ← ADR 架构决策记录
-├── scripts/                          ← 运维脚本
-└── pyproject.toml                    ← 顶层 workspace（dev 工具配置）
-```
+> **"一个让用户从原始标注数据到目标检测结果，全流程可视化的工程化平台。"**
+> —— 不出现 YOLO、Gradio、FastAPI 等技术名词，适合答辩开场白
 
 ---
 
-## 2. 模块详解：各司其职
+## 第一章：五层架构总览
 
-### 2.1 common/ — 基础设施层
-
-**路径**：`apps/platform/src/odp_platform/common/`
-
-```python
-from odp_platform.common.paths import ROOT_DIR, DATA_DIR, CHECKPOINTS_DIR, ...
-```
-
-| 文件 | 功能 |
-|------|------|
-| `paths.py` | `.odp-workspace` marker 向上遍历找根目录，统一管理所有路径常量 |
-| `logging_utils.py` | 根 Logger 装配 + 彩色控制台 + 文件日志，幂等保护 |
-| `constants.py` | 共享枚举（`AnnotationFormat`, `Task`, `RunTask`）和字面量 |
-| `performance_utils.py` | `@time_it` 装饰器、`timer` 上下文管理器、`MetricTracker` 等 |
-| `string_utils.py` | 格式化表格工具（`format_table_row`） |
-| `system_utils.py` | `log_device_info()` 打印系统/GPU 信息 |
-
-**设计要点**：
-- `paths.py` 不硬编码任何绝对路径，全部从 marker 动态探测
-- `logging_utils.py` 有幂等保护：`if logger.handlers: return logger`
-- `constants.py` 用 class 定义枚举（非 Enum），方便装饰器直接引用
-
-### 2.2 data_pipeline/ — 数据格式转换
-
-**路径**：`apps/platform/src/odp_platform/data_pipeline/`
-
-**核心设计——注册表模式**：
+ODPlatform 的核心架构是 **CLI → Service → Core → Config → Common** 五层。
 
 ```
-registry.py            ← `_REGISTRY` dict + `@register` 装饰器
-  │
-  ├── service.py       ← `converter_data_to_yolo()` 查询注册表并调用
-  │
-  ├── core/            ← 具体转换器（被 @register 自动注册）
-  │   ├── coco.py          COCO JSON → YOLO txt（调 ultralytics 实现）
-  │   ├── pascal_voc.py    Pascal VOC XML → YOLO txt
-  │   └── yolo.py          YOLO txt 之间的格式转换/校验
-  │
-  ├── split/           ← 数据集划分
-  │   ├── splitter.py      图片-标签对按比例随机划分
-  │   ├── materializer.py  划分结果落盘（创建 train/val/test 目录）
-  │   ├── yaml_writer.py   生成 <dataset>.yaml（供 YOLO 训练使用）
-  │   └── manifest.py      PairList：图片-标签配对数据结构
-  │
-  └── orchestrator.py  ← DatasetPipeline 端到端编排器
+                    ┌──────────────────────────────────────────────┐
+                    │              WebUI (Gradio)                   │
+                    │         app.py + 6 用户 Tab + 5 管理 Tab       │
+                    │            (不属于五层，在顶层调用)              │
+                    └──────────────────────┬───────────────────────┘
+                                           │
+                    ┌──────────────────────▼───────────────────────┐
+    第1层 CLI       │  cli/ 命令行入口                              │
+                    │  ├── train.py     解析 --dataset/--model      │
+                    │  ├── infer.py     解析 --source/--conf        │
+                    │  ├── transform_data.py  解析 --format         │
+                    │  ├── validate_data.py   解析 --dataset        │
+                    │  ├── val.py       解析 --model/--dataset      │
+                    │  ├── config_cli.py    配置生成/溯源/快照       │
+                    │  ├── init_project.py   创建运行时目录          │
+                    │  └── reset_project.py  清理运行时数据          │
+                    └──────────────────────┬───────────────────────┘
+                                           │ 调用
+                    ┌──────────────────────▼───────────────────────┐
+    第2层 Service   │  业务流程编排层                               │
+                    │                                               │
+                    │  data_pipeline/orchestrator.py                │
+                    │    DatasetPipeline: raw → YOLO → split → YAML │
+                    │                                               │
+                    │  data_validation/service.py                   │
+                    │    validate_dataset(): 执行全部 check → 报告    │
+                    │                                               │
+                    │  training/experiment.py                       │
+                    │    run_experiment(): YOLO.train() + hooks      │
+                    │                                               │
+                    │  inference/service.py                         │
+                    │    InferService.predict(): 帧源→检测→输出      │
+                    │                                               │
+                    │  evaluation/service.py                        │
+                    │    ValService.validate(): YOLO.val()           │
+                    │                                               │
+                    │  run_config/service.py                        │
+                    │    build_config(): 三源合并→校验→溯源          │
+                    └──────────────────────┬───────────────────────┘
+                                           │ 编排
+                    ┌──────────────────────▼───────────────────────┐
+    第3层 Core      │  业务逻辑实现层                               │
+                    │                                               │
+                    │  data_pipeline/core/                          │
+                    │    coco.py / pascal_voc.py / yolo.py          │
+                    │    ← @register 注册表，一个文件一个格式         │
+                    │                                               │
+                    │  data_validation/checks/                      │
+                    │    yaml_schema.py / pair_existence.py         │
+                    │    label_format.py / split_uniqueness.py      │
+                    │    ← @check 注册表，一个文件一项检查            │
+                    │                                               │
+                    │  training/  ← experiment 兼 Service+Core      │
+                    │    tracker.py / recipe.py / callbacks.py      │
+                    │                                               │
+                    │  inference/                                   │
+                    │    engine.py (Detector) / visualizer.py       │
+                    │    frame_source/ (Camera/Video/Image Source)  │
+                    │                                               │
+                    │  evaluation/ ← 直接封装 YOLO.val()            │
+                    └──────────────────────┬───────────────────────┘
+                                           │ 读取
+                    ┌──────────────────────▼───────────────────────┐
+    第4层 Config    │  run_config/ 配置管理子系统                    │
+                    │                                               │
+                    │  registry.py  ← @config_generator 注册        │
+                    │  loader.py    ← YAML 加载 + CLI 参数解析      │
+                    │  merger.py    ← 默认值→YAML→CLI 三源合并      │
+                    │  validator.py ← 字段类型/范围/必填校验        │
+                    │  schema.py    ← ConfigBundle/TraceRecord      │
+                    │  service.py   ← build_config / restore        │
+                    │  fields/      ← 各任务字段定义                │
+                    │    train.py / val.py / predict.py             │
+                    └──────────────────────┬───────────────────────┘
+                                           │ 使用
+                    ┌──────────────────────▼───────────────────────┐
+    第5层 Common    │  common/ 基础设施层                           │
+                    │                                               │
+                    │  paths.py         ← .odp-workspace marker     │
+                    │  logging_utils.py ← 根 Logger 装配            │
+                    │  constants.py     ← AnnotationFormat/Task     │
+                    │  performance_utils.py ← @time_it / timer      │
+                    │  string_utils.py  ← format_table              │
+                    │  system_utils.py  ← log_device_info           │
+                    └──────────────────────────────────────────────┘
 ```
 
-**端到端流程**：
+### 各层职责
 
-```
-CLI: odp-transform --dataset rsod --format pascal_voc
-  │
-  ├── DatasetPipeline.__init__(dataset_name="rsod", annotation_format="pascal_voc")
-  │
-  ├── _check_raw() → 验证 data/raw/rsod/{images,annotations}/ 存在
-  │
-  ├── service.converter_data_to_yolo() → registry.get_converter("pascal_voc")
-  │   └── core/pascal_voc.py 被 @register("pascal_voc") 装饰 → 自动注册
-  │   └── entry.func(input_dir, output_labels_dir, options)
-  │       └── 解析 XML → 提取 bbox + class → 写入 YOLO txt
-  │
-  ├── split_pairs() → 按 train_rate/val_rate 随机打乱划分
-  │
-  ├── materialize() → 创建 data/train/{images,labels}/ + val/ + test/
-  │   └── 软链接图片 + 写入 .txt 标签
-  │
-  └── write_dataset_yaml() → configs/datasets/rsod.yaml
-      └── 包含: path/nc/names/train/val/test
-```
+| 层 | 职责 | 核心原则 |
+|----|------|---------|
+| **CLI** | 参数解析、流程控制、调用 Service | 不做业务逻辑，只做参数→函数映射 |
+| **Service** | 业务流程编排、协调子模块、错误处理 | 一个函数完成一个完整用例 |
+| **Core** | 业务逻辑具体实现 | 单一职责，每个文件只做一件事 |
+| **Config** | 配置管理（三源合并、溯源、快照） | 字段为中心，独立于业务链 |
+| **Common** | 基础设施 | 不依赖任何业务模块 |
 
-**支持格式**：
+### 两个外部系统
 
-| 输入格式 | 注册名 | 支持任务 |
-|---------|--------|---------|
-| Pascal VOC (XML) | `pascal_voc` | detect |
-| COCO (JSON) | `coco` | detect, segment |
-| YOLO (txt) | `yolo` | detect |
+| 系统 | 位置 | 与五层的关系 |
+|------|------|-------------|
+| **Gradio WebUI** | `webui/` | 在五层之上，通过 Service/Core 层调用推理和训练 |
+| **FastAPI 后端** | `apps/web-backend/` | 独立服务，可选。训练 hooks 自动同步数据到后端 |
 
-新增格式只需 `@register("new_format")` 实现一个转换函数，无需改任何其他代码。
+---
 
-### 2.3 data_validation/ — 数据质量校验
+## 第二章：各层详解
 
-**路径**：`apps/platform/src/odp_platform/data_validation/`
-
-同样采用注册表模式：
-
-```
-registry.py ← `_REGISTRY` + `@check("name")` 装饰器
-  │
-  ├── service.py     ← validate_dataset() 端到端入口
-  ├── report.py      ← ValidationReport 数据类、render_to_logger()
-  ├── snapshot.py    ← DatasetSnapshot 数据快照（YAML + 目录扫描）
-  ├── render.py      ← 渲染工具
-  │
-  └── checks/        ← 具体检查项（被 @check 自动注册）
-      ├── yaml_schema.py     ← 检查 nc/path/names/train/val/test 字段
-      ├── pair_existence.py  ← 检查每张图是否有对应标签文件
-      ├── label_format.py    ← 检查标签内容格式（YOLO: cls x y w h）
-      └── split_uniqueness.py ← 检查 train/val/test 无重复
-```
-
-**端到端流程**：
-
-```
-CLI: odp-validate --dataset rsod
-  │
-  ├── validate_dataset(yaml_path)
-  │   ├── build_snapshot() → 解析 YAML + 扫描目录
-  │   │   └── 收集 images_per_split / labels_per_split 信息
-  │   │
-  │   ├── run_all_checks()
-  │   │   ├── yaml_schema → 验证 nc/path/names 字段
-  │   │   ├── pair_existence → 验证图片-标签对应关系
-  │   │   ├── label_format → 验证每行 cls x y w h 格式
-  │   │   └── split_uniqueness → 验证跨 split 无重复
-  │   │
-  │   └── ValidationReport → JSON + 控制台输出
-  │
-  └── 返回 exit_code（0=通过, 1=警告, 2=错误）
-```
-
-### 2.4 training/ — 模型训练
-
-**路径**：`apps/platform/src/odp_platform/training/`
-
-| 文件 | 功能 |
-|------|------|
-| `experiment.py` | `ExperimentConfig` + `run_experiment()` + `ExperimentResult` |
-| `callbacks.py` | `TrainingHooks`（后端同步）+ `normalize_csv_row()` |
-| `tracker.py` | `ExperimentSummary` 数据结构 |
-| `recipe.py` | 预置实验配置（RSOD/VisDrone baseline, LR sweep） |
-
-**端到端训练流程**：
-
-```
-CLI: odp-train --dataset rsod --model yolo11n.pt --epochs 100
-  │
-  ├── cli/train.py 解析参数 → build_config() 生成配置 → 合并 CLI 覆盖
-  │
-  ├── run_experiment(config)
-  │   ├── 创建实验目录 runs/experiments/<name>/
-  │   ├── 保存 config_snapshot.json 快照
-  │   │
-  │   ├── TrainingHooks.on_train_start()
-  │   │   └── POST /api/experiments （后端不可达则静默降级）
-  │   │
-  │   ├── YOLO.train(**train_kwargs)
-  │   │   ├── data = configs/datasets/<dataset>.yaml
-  │   │   ├── epochs/batch/imgsz/lr0/optimizer/amp/patience
-  │   │   └── project = runs/experiments/, name = <name>
-  │   │   │
-  │   │   └── 训练过程中，Ultralytics 自动回调：
-  │   │       └── TrainingHooks.on_epoch_end() → normalize_csv_row() → POST epochs
-  │   │
-  │   ├── TrainingHooks.on_train_end()
-  │   │   └── PATCH /api/experiments/{id}/status
-  │   │
-  │   ├── 复制 best.pt → checkpoints/best_<name>.pt
-  │   │
-  │   ├── _sync_to_backend() → POST /api/experiments
-  │   │
-  │   └── 返回 ExperimentResult（map50/map50_95/precision/recall/...）
-  │
-  └── 输出：
-      ├── runs/experiments/<name>/
-      │   ├── config_snapshot.json
-      │   ├── results.csv（逐轮指标）
-      │   ├── results.png / PR_curve.png / F1_curve.png
-      │   ├── confusion_matrix.png / labels.jpg
-      │   └── weights/best.pt + last.pt
-      └── data/models/checkpoints/best_<name>.pt
-```
-
-**预置实验配方**（`recipe.py`）：
-
-| 配方名 | 数据集 | 模型 | Epochs | ImgSz | Batch | LR |
-|--------|--------|------|--------|-------|-------|----|
-| RSOD_BASELINE | rsod | yolo11n.pt | 100 | 640 | 16 | 0.01 |
-| VISDRONE_BASELINE | visdrone | yolo11n.pt | 150 | 1024 | 8 | 0.005 |
-| LR_SWEEP | rsod | yolo11n.pt | 100 | 640 | 16 | 0.01/0.005/0.001 |
-
-**CSV 列名适配器**（`callbacks.py`）：
-
-```python
-_COLUMN_ALIASES = {
-    "metrics/mAP50(B)": "map50",      # Ultralytics v8 格式
-    "metrics/mAP50-95(B)": "map50_95",
-    "metrics/precision(B)": "precision",
-    "metrics/recall(B)": "recall",
-    "train/box_loss": "box_loss",
-    "val/box_loss": "val_box_loss",
-    "lr/pg0": "lr",
-}
-```
-
-### 2.5 run_config/ — 配置管理
-
-**路径**：`apps/platform/src/odp_platform/run_config/`
-
-独立于业务链的配置子系统，处理四层配置覆盖：
-
-```
-CLI 参数 (最高优先级)
-     ↓
-  YAML 配置文件
-     ↓
-  环境变量 ODP_*
-     ↓
-  默认值 (最低优先级)
-```
-
-**目录结构**：
-
-```
-run_config/
-├── __init__.py        导出 API：build_config, save_snapshot, restore_from_snapshot
-├── registry.py        @config_generator 装饰器 + list_fields()
-├── service.py         核心调度 (build_config / validate / trace / snapshot)
-├── loader.py          load_yaml / parse_cli_args / resolve_yaml_path
-├── merger.py          多源配置合并 + TraceReport
-├── schema.py          ConfigBundle / ConfigSnapshot / TraceRecord 数据类
-├── validator.py       配置校验（字段类型/范围/必填）
-├── template.py        配置模板生成
-└── fields/            各任务字段定义
-    ├── train.py       训练配置字段
-    ├── val.py         评估配置字段
-    └── predict.py     推理配置字段
-```
-
-**关键 API**：
-
-```python
-from odp_platform.run_config import build_config, save_snapshot_to_file
-
-# 构建配置（YAML + CLI 覆盖 + 环境变量）
-bundle = build_config(task="train", yaml_path=Path("train.yaml"), cli_args={"epochs": 200})
-bundle.config    # 合并后的完整配置 dict
-bundle.trace     # TraceReport：每个字段的来源追溯
-bundle.errors    # 验证错误列表
-bundle.warnings  # 验证警告列表
-
-# 快照
-save_snapshot_to_file(bundle.snapshot, Path("snapshot.json"))
-restored = restore_from_snapshot(loaded_snapshot)
-```
-
-### 2.6 evaluation/ — 模型评估
-
-**路径**：`apps/platform/src/odp_platform/evaluation/`
-
-| 文件 | 功能 |
-|------|------|
-| `service.py` | `ValService.validate()` 使用 Ultralytics YOLO 验证模型精度 |
-
-**端到端流程**：
-
-```
-CLI: odp-val --model best.pt --dataset rsod
-  │
-  ├── ValService.validate(model_path, dataset, yaml_path)
-  │   ├── build_config(task="val") → 配置合并
-  │   ├── YOLO.val(data=dataset_yaml, model=model_path, ...)
-  │   └── 返回 ValResult(metrics = {map50, map50_95, precision, recall, ...})
-  │
-  └── 输出 runs/val/<experiment_name>/
-      ├── config_snapshot.json
-      └── 验证结果指标
-```
-
-### 2.7 inference/ — 模型推理
-
-**路径**：`apps/platform/src/odp_platform/inference/`
-
-推理模块是整个项目中最复杂的模块，分为三层：
-
-```
-业务层:
-  service.py           ← InferService.predict() 端到端推理编排
-  engine.py            ← Detector：YOLO 模型加载 + 检测
-  pipeline_config.py   ← PipelineConfig：推理管道配置
-  visualizer.py        ← draw_detections / draw_info_panel / draw_confidence_histogram
-  benchmark.py         ← 推理基准测试
-  data_visualizer.py   ← 数据可视化工具
-  utils.py             ← 推理工具函数
-
-帧源抽象层 (frame_source/):
-  core/
-    base.py            ← FrameSource 抽象基类（open/read/close/seek）
-    config.py          ← CameraConfig (Pydantic)
-    types.py           ← Frame/SourceType 类型定义
-  sources/
-    camera.py          ← CameraSource（OpenCV 摄像头）
-    image.py           ← ImageSource / ImageFolderSource
-    video.py           ← VideoSource
-  wrappers/
-    threaded.py        ← ThreadedSource（采集-消费分离，实时推理首选）
-    aio.py             ← AsyncSource（异步接口）
-  factory.py           ← create_frame_source() + 注册表模式
-  overlay.py           ← HUD 叠加层（FPS/帧率/检测数）
-```
-
-**端到端推理流程**：
-
-```
-CLI: odp-infer --source test.jpg --model best.pt
-
-CLI: odp-infer --source 0 --model best.pt --threaded   # 摄像头实时
-  │
-  ├── cli/infer.py 解析参数 → InferService.predict(cli_args)
-  │
-  ├── 帧源识别:
-  │   ├── str.isdigit() → CameraSource（设备号）
-  │   ├── .mp4/.avi → VideoSource（视频文件）
-  │   ├── .jpg/.png → ImageSource（单张图片）
-  │   ├── 目录路径 → ImageFolderSource（文件夹）
-  │   └── rtsp:// → CameraSource（RTSP 流）
-  │
-  ├── 模型加载:
-  │   └── Detector(model_path) → YOLO(model_path)
-  │       └── warmup() → GPU JIT 预热（仅 CUDA）
-  │
-  ├── 逐帧推理循环:
-  │   ├── frame = source.read()
-  │   ├── result = detector.detect(frame.image)
-  │   │   ├── YOLO 前向传播 → NMS → Detection[]
-  │   │   └── 每个 Detection: {class_id, class_name, confidence, bbox}
-  │   ├── rendered = draw_detections(frame, detections)
-  │   ├── rendered = draw_info_panel(rendered, fps, infer_ms, ...)
-  │   └── 输出:
-  │       ├── 写入 output.mp4（视频源）
-  │       ├── 写入 frame_0000.jpg（图片源）
-  │       └── cv2.imshow()（--show 参数）
-  │
-  └── 返回 InferResult:
-      ├── stats = {frames, detections, per_class, avg_fps, avg_latency_ms}
-      ├── output_dir = runs/infer/<experiment_name>/
-      └── error（失败时）
-```
-
-**WebUI 单图检测流程**（前端→后端的完整链路）：
-
-```
-用户上传图片 → gr.Image(type="numpy")
-  │
-  ├── 点击"开始检测"
-  │
-  ├── Gradio 调用 _run_single_detection(image, model_path, conf, iou)
-  │   │
-  │   ├── _get_or_create_detector(model_path, conf, iou)
-  │   │   ├── 检查 _detector_cache（dict + threading.Lock 线程安全）
-  │   │   ├── 未命中 → Detector(model_path) → 存入缓存
-  │   │   └── 命中 → 更新 conf/iou 参数
-  │   │
-  │   ├── detector.detect(image_np)
-  │   │   ├── YOLO(image_np, conf=conf, iou=iou, verbose=False)
-  │   │   ├── 解析 results.boxes → Detection[]
-  │   │   └── 返回 InferenceResult
-  │   │
-  │   ├── draw_detections(image_np, detections)
-  │   │   └── cv2.rectangle + cv2.putText → 标注图片
-  │   │
-  │   └── 返回 (标注图片, JSON检测明细, 状态文字, detector_state)
-  │
-  └── Gradio 渲染到 image_out + result_json + status
-```
-
-**WebUI 摄像头实时检测流程**：
-
-```
-用户点击"启动摄像头"
-  │
-  ├── _run_server_camera(camera_id, model_path, conf, iou)
-  │   │
-  │   ├── _release_server_camera() 释放前一个摄像头
-  │   │
-  │   ├── cap = cv2.VideoCapture(int(camera_id))
-  │   │   ├── 后端: cv2.CAP_DSHOW（Windows）
-  │   │   └── 设置分辨率: 640x480
-  │   │
-  │   ├── detector = _get_or_create_detector(model_path, conf, iou)
-  │   │
-  │   ├── 循环（while not _server_cam_stop.is_set()）:
-  │   │   ├── ret, frame = cap.read()
-  │   │   ├── result = detector.detect(frame_rgb)
-  │   │   ├── rendered = draw_detections(frame, detections)
-  │   │   └── yield rendered（生成器 → gr.Image 流式更新）
-  │   │
-  │   └── cap.release() + torch.cuda.empty_cache()
-  │
-  └── _server_cam_stop = threading.Event() 控制停止
-```
-
-**GPU JIT 预热机制**（`engine.py`）：
-
-```python
-def warmup(self, image_size=(640, 640)):
-    """用纯黑图跑一次推理，消除首次 CUDA kernel 编译延迟。
-    仅在 CUDA 设备上生效，CPU 推理跳过。
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device == "cpu":
-        return
-    dummy = np.zeros((*image_size, 3), dtype=np.uint8)
-    self.detect(dummy)
-```
-
-### 2.8 webui/ — Gradio 前端
-
-**路径**：`apps/platform/src/odp_platform/webui/`
-
-**双模式设计**：
-
-```
-odp-webui 启动
-  │
-  ├── app.py → gr.Blocks(css=APP_CSS)
-  │   │
-  │   ├── 用户名密码登录（用户/管理员模式切换）
-  │   │
-  │   ├── 用户模式 Tab（6 个）:
-  │   │   ├── 单图检测  ← create_single_detection_ui()
-  │   │   ├── 文件夹检测  ← create_folder_detection_ui()
-  │   │   ├── 视频检测  ← create_video_detection_ui()
-  │   │   ├── 实时摄像头  ← create_live_camera_ui()
-  │   │   ├── 模型选择  ← create_model_selection_ui()
-  │   │   └── LLM对话  ← create_llm_chat_ui()
-  │   │
-  │   └── 管理员模式额外 Tab（+5 个）:
-  │       ├── Dashboard ← create_dashboard_ui()
-  │       ├── 模型演示 ← create_model_demo_ui()
-  │       ├── 数据集浏览 ← create_dataset_browser_ui()
-  │       ├── 训练 ← create_training_ui()
-  │       ├── 数据校验 ← create_validation_ui()
-  │       └── 配置管理 ← create_config_ui()
-  │
-  └── 启动 FastAPI 后端: subprocess(["uvicorn", "main:app", ...])
-```
-
-| 文件 | 职责 |
-|------|------|
-| `app.py` | Gradio 入口，组装配件 + CSS 样式 + 后端进程启动 |
-| `user_tabs.py` | 6 个用户 Tab + 4 个检测函数 + Agent LLM 对话 |
-| `llm_agent.py` | 关键词路由 Agent（模型/实验/推理/GPU 查询） |
-| `training_tab.py` | 管理员训练 Tab（配置表单 + 训练启动 + 实时日志） |
-| `dashboard.py` | 管理员 Dashboard |
-| `utils.py` | 工具函数：`list_model_files()`（5 秒 TTL 缓存）、`run_python_module()`、JSON/CSV 导出 |
-| `config_tab.py` | 配置管理 UI |
-| `validation_tab.py` | 数据校验 UI |
-| `model_demo.py` | 模型演示 Tab |
-| `dataset_browser.py` | 数据集浏览 Tab |
-| `dataset_analysis.py` | 数据集分析工具 |
-
-**关键性能优化**：
-
-```python
-# 1. 模型缓存（避免切换 Tab 重复加载）
-_detector_cache: dict[str, Detector] = {}
-_cache_lock = threading.Lock()
-
-# 2. 模型文件扫描缓存（5 秒 TTL）
-@lru_cache(maxsize=1)
-def list_model_files(ttl: int = 5) -> list[str]: ...
-
-# 3. 摄像头资源管理
-_server_cam_stop = threading.Event()
-_server_cap_ref = [None]  # 单例引用，确保只有一个摄像头实例
-```
-
-### 2.9 cli/ — 命令行入口
+### 2.1 CLI 层（第 1 层）
 
 **路径**：`apps/platform/src/odp_platform/cli/`
 
 10 个命令，全部注册在 `pyproject.toml` 的 `[project.scripts]`：
 
-| 命令 | 入口模块 | 调用链 |
-|------|---------|--------|
-| `odp-init` | `init_project.py` | → `paths.get_dirs_to_initialize()` → `Path.mkdir()` |
-| `odp-reset` | `reset_project.py` | → 清理运行时目录 |
-| `odp-transform` | `transform_data.py` | → `DatasetPipeline` → `service.converter_data_to_yolo()` → `core/*.py` |
-| `odp-validate` | `validate_data.py` | → `validate_dataset()` → `run_all_checks()` → `checks/*.py` |
-| `odp-config` | `config_cli.py` | → `run_config.service.build_config()` / `save_snapshot_to_file()` |
-| `odp-train` | `train.py` | → `build_config()` → `run_experiment()` → `YOLO.train()` |
-| `odp-val` | `val.py` | → `ValService.validate()` → `YOLO.val()` |
-| `odp-infer` | `infer.py` | → `InferService.predict()` → `Detector.detect()` |
-| `odp-webui` | `webui/app.py` | → `gr.Blocks().launch()` |
-| `odp-backend` | `backend.py` | → `subprocess(["uvicorn", "main:app"])` |
+| 命令 | 文件 | 做了什么 |
+|------|------|---------|
+| `odp-init` | `init_project.py` | 调用 `paths.get_dirs_to_initialize()` 创建全部运行时目录 |
+| `odp-reset` | `reset_project.py` | 清理运行时数据（日志/运行产物） |
+| `odp-transform` | `transform_data.py` | argc: --dataset --format --task → 调用 `DatasetPipeline` |
+| `odp-validate` | `validate_data.py` | argc: --dataset / --yaml → 调用 `validate_dataset()` |
+| `odp-config` | `config_cli.py` | argc: generate / trace / snapshot → 调用 `run_config.service` |
+| `odp-train` | `train.py` | argc: --dataset --model --epochs → 调用 `run_experiment()` |
+| `odp-val` | `val.py` | argc: --model --dataset → 调用 `ValService.validate()` |
+| `odp-infer` | `infer.py` | argc: --source --model --conf → 调用 `InferService.predict()` |
+| `odp-webui` | `webui/app.py:main()` | 启动 Gradio 服务 `gr.Blocks().launch()` |
+| `odp-backend` | `backend.py` | 启动 FastAPI `subprocess(["uvicorn", "main:app"])` |
 
-### 2.10 web-backend/ — FastAPI 后端
+**CLI 层设计模式**：每个命令文件 = 一个 `_build_parser()` + 一个 `main()` 函数。
 
-**路径**：`apps/web-backend/`
-
-**API 路由一览**：
-
-| 路由 | 方法 | 功能 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/auth/register` | POST | 用户注册 |
-| `/auth/login` | POST | 用户登录 |
-| `/users/me` | GET | 当前用户信息 |
-| `/users/me/history` | GET | 用户历史记录 |
-| `/models` | GET/POST | 模型列表 / 上传模型 |
-| `/models/upload` | POST | 模型文件上传 |
-| `/models/{filename}` | DELETE | 删除模型 |
-| `/experiments` | POST | 创建实验记录 |
-| `/experiments/{id}` | PATCH | 更新实验状态 |
-| `/experiments/{id}/epochs` | POST | 写入逐轮指标 |
-| `/detection` | POST | 创建检测任务 |
-| `/detection/{task_id}` | GET | 查询检测结果 |
-| `/llm/chat` | POST | LLM 对话代理 |
-| `/llm/models` | GET | 可用 LLM 模型列表 |
-| `/validation/reports` | GET/POST | 质检报告 |
-
-**后端不启动的影响**：
-
-训练/Hooks 中对后端的调用都有 `try/except` + 超时 3 秒：
 ```python
-try:
-    requests.post(url, json=payload, timeout=3)
-except requests.RequestException:
-    logger.warning("后端不可达，实验仅保存在本地")
+# cli/train.py 的典型结构
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="odp-train")
+    parser.add_argument("--dataset", "-d", required=True)
+    parser.add_argument("--epochs", type=int)
+    # ...更多参数
+    return parser
+
+def main() -> int:
+    args = _build_parser().parse_args()
+    # 调用 Service 层
+    config = build_config(task="train", ...)        # → Config 层
+    result = run_experiment(config)                  # → Service 层
+    print(f"mAP50: {result.map50:.4f}")
+    return 0
 ```
 
-- 训练正常执行，不受影响
-- 逐轮指标只写本地 CSV，不丢失
-- Dashboard 只在后端启动时才有数据
+### 2.2 Service 层（第 2 层）
+
+服务层编排完整业务流程，一个函数完成一个完整用例。
+
+#### data_pipeline — 数据转换服务
+
+```python
+# orchestrator.py — 数据集端到端编排
+pipe = DatasetPipeline(
+    dataset_name="rsod",
+    annotation_format="pascal_voc",  # → 注册表查找 converter
+)
+pipe.pipeline()  # raw → YOLO → split → yaml
+```
+
+调用链：
+
+```
+odp-transform --dataset rsod --format pascal_voc
+  → DatasetPipeline.pipeline()
+      → _check_raw()              验证 data/raw/rsod/{images,annotations}/
+      → service.converter_data_to_yolo()  Core 层查注册表
+          → core/pascal_voc.py    逐 XML 解析，写 YOLO txt
+      → split_pairs()             随机划分 train/val/test
+      → materialize()             落盘到 data/{train,val,test}/
+      → write_dataset_yaml()      写 configs/datasets/rsod.yaml
+```
+
+#### data_validation — 数据校验服务
+
+```python
+# service.py — 端到端质检
+report = validate_dataset(
+    yaml_path=Path("configs/datasets/rsod.yaml"),
+    task_type="detect",
+)
+# report.exit_code: 0=通过, 1=警告, 2=错误
+```
+
+调用链：
+
+```
+odp-validate --dataset rsod
+  → validate_dataset(yaml_path)
+      → build_snapshot()          扫描目录，构建不可变快照
+      → run_all_checks()          执行全部 @check 注册的检查项
+          → checks/yaml_schema.py             验证 YAML 字段
+          → checks/pair_existence.py          验证图片-标签配对
+          → checks/label_format.py            验证每行标签格式
+          → checks/split_uniqueness.py        验证无跨集重复
+      → ValidationReport          生成报告 + 退出码
+```
+
+#### training — 训练服务
+
+```python
+# experiment.py — 训练入口
+config = ExperimentConfig(
+    name="rsod_baseline",
+    dataset="rsod",
+    model="yolo11n.pt",
+    epochs=100,
+)
+result = run_experiment(config)
+```
+
+调用链：
+
+```
+odp-train --dataset rsod --model yolo11n.pt
+  → build_config(task="train")            Config 层：三源合并
+  → run_experiment(config)                Service 层：编排训练
+      → TrainingHooks.on_train_start()    通知后端（可选）
+      → YOLO.train(**train_kwargs)        Ultralytics 实际训练
+      → TrainingHooks.on_epoch_end()      逐轮同步到后端（可选）
+      → _sync_to_backend()                最终结果同步
+      → 复制 best.pt → checkpoints/       模型归档
+```
+
+#### inference — 推理服务
+
+```python
+# service.py — 推理编排
+service = InferService()
+result = service.predict(
+    cli_args={"source": "test.jpg", "model": "best.pt"}
+)
+```
+
+调用链：
+
+```
+odp-infer --source test.jpg --model best.pt
+  → InferService.predict(cli_args)
+      → create_frame_source(source_str)   帧源识别
+          ├── str.isdigit() → CameraSource
+          ├── .mp4/.avi    → VideoSource
+          ├── .jpg/.png    → ImageSource
+          └── 目录路径      → ImageFolderSource
+      → Detector(model_path)              模型加载
+      → 循环逐帧:
+          frame = source.read()
+          result = detector.detect(frame)
+          rendered = draw_detections(frame, result.detections)
+          → 输出: 图片/视频/终端显示
+      → InferResult(stats, output_dir)
+```
+
+### 2.3 Core 层（第 3 层）
+
+核心层实现单一业务逻辑，每个文件只做一件事。
+
+#### 注册表模式 — 数据转换器
+
+`data_pipeline/core/` 下的转换器通过 `@register` 装饰器自动注册：
+
+```python
+# core/pascal_voc.py
+@register(AnnotationFormat.PASCAL_VOC, supported_tasks=(Task.DETECT,))
+def convert_pascal_voc(input_dir, output_labels_dir, options):
+    """Pascal VOC XML → YOLO txt。一个函数完成一个格式的转换。"""
+    for xml_file in input_dir.glob("*.xml"):
+        tree = ET.parse(xml_file)
+        # 提取 bbox → 归一化 → 写 .txt
+    return class_names
+```
+
+新增格式 = 新建 `core/new_format.py` + 加 `@register("format_name")`，不改任何旧代码。
+
+#### 注册表模式 — 数据校验器
+
+`data_validation/checks/` 下的检查项通过 `@check` 装饰器注册：
+
+```python
+# checks/yaml_schema.py
+@check("yaml_schema")
+def validate_yaml_schema(ctx: CheckContext) -> CheckResult:
+    """验证 YAML 的 nc/path/names/train/val/test 字段完整性。"""
+    ...
+```
+
+新增检查 = 新建 `checks/check_name.py` + 加 `@check("name")`，不改旧代码。
+
+#### Detector — 推理引擎
+
+```python
+# inference/engine.py
+class Detector:
+    def __init__(self, model_path, conf=0.25, iou=0.45):
+        self._model = YOLO(model_path)
+
+    def detect(self, image: np.ndarray) -> InferenceResult:
+        # YOLO 前向传播 → NMS → Detection[]
+        return InferenceResult(detections=[...], inference_ms=12.3, ...)
+
+    def warmup(self):
+        """GPU JIT 预热：纯黑图跑一次推理，消除首次 CUDA 编译延迟"""
+        if torch.cuda.is_available():
+            dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+            self.detect(dummy)
+```
+
+#### frame_source — 帧源抽象
+
+```python
+# frame_source/core/base.py
+class FrameSource(ABC):
+    @abstractmethod
+    def open(self) -> bool
+    @abstractmethod
+    def read(self) -> Optional[Frame]
+    @abstractmethod
+    def close(self) -> None
+    def seek(self, frame=None, time_sec=None) -> bool  # 可选支持
+
+# frame_source/factory.py — 注册表模式
+@register_source("camera")(CameraSource)
+@register_source("video", extensions=["mp4","avi"])(VideoSource)
+@register_source("image", extensions=["jpg","png"])(ImageSource)
+@register_source("folder")(ImageFolderSource)
+```
+
+新增输入源 = 新建 Source 类 + `@register_source("name")`，factory 不用改。
+
+### 2.4 Config 层（第 4 层）
+
+配置管理子系统 `run_config/` 独立于业务链：
+
+```
+run_config/
+├── registry.py        @config_generator 装饰器 + list_fields()
+├── service.py         build_config / restore_from_snapshot / save_snapshot
+├── loader.py          load_yaml + parse_cli_args + resolve_yaml_path
+├── merger.py          三源合并（默认值→YAML→CLI）+ TraceReport
+├── schema.py          ConfigBundle / ConfigSnapshot / TraceRecord
+├── validator.py       字段类型/范围/必填校验
+├── template.py        配置模板生成
+└── fields/            各任务字段定义
+    ├── train.py       训练字段（epochs, batch, lr0, optimizer, amp...）
+    ├── val.py         评估字段（conf, iou, half, max_det...）
+    └── predict.py     推理字段（source, save_txt, save_conf...）
+```
+
+**三源合并**：
+
+```python
+# 配置来源优先级（高→低）：
+# 1. CLI 参数  --epochs 200
+# 2. YAML 文件 train.yaml  → epochs: 100
+# 3. 代码默认值             → ConfigField(default=50)
+#
+# 最终值: epochs = 200（CLI 胜出）
+
+bundle = build_config(
+    task="train",
+    yaml_path=Path("train.yaml"),
+    cli_args={"epochs": 200},
+)
+bundle.config   # 合并后的完整配置
+bundle.trace    # 每个字段的来源链（从哪来→最终值）
+```
+
+**配置快照**：
+
+```python
+# 每次训练自动保存
+snapshot_path = exp_dir / "config_snapshot.json"
+snapshot_path.write_text(config.to_json())
+
+# 可恢复历史配置
+restored = restore_from_snapshot(loaded_snapshot)
+```
+
+### 2.5 Common 层（第 5 层）
+
+基础设施层，不依赖任何业务模块。
+
+| 文件 | 功能 | 关键实现 |
+|------|------|---------|
+| `paths.py` | 路径探测 + 路径常量 | `.odp-workspace` marker 向上遍历 + `@cache` |
+| `logging_utils.py` | 日志装配 | 幂等保护 + propagate=False + colorlog 彩色输出 |
+| `constants.py` | 共享枚举 | `AnnotationFormat`、`Task`、`RunTask` class |
+| `performance_utils.py` | 性能工具 | `@time_it`、`timer()`、`MetricTracker` |
+| `string_utils.py` | 格式化工具 | `format_table_row()` |
+| `system_utils.py` | 系统信息 | `log_device_info()` |
+
+**Marker 路径探测**：
+
+```python
+# common/paths.py
+@cache
+def _find_workspace_root(start: Path) -> Path:
+    """从当前文件向上找 .odp-workspace 标记文件。"""
+    current = start.resolve()
+    for parent in [current, *current.parents]:
+        if (parent / WORKSPACE_MARKER).exists():
+            return parent
+    raise FileNotFoundError(f"未找到 {WORKSPACE_MARKER}")
+
+ROOT_DIR = _find_workspace_root(Path(__file__))
+DATA_DIR = ROOT_DIR / "data"
+CHECKPOINTS_DIR = DATA_DIR / "models" / "checkpoints"
+```
+
+**日志系统**：
+
+```python
+# 根 Logger（入口调一次）
+get_logger(base_path=LOGGING_DIR, log_type="train")
+# → 自动创建 FileHandler → logging/train/*.log
+# → 自动创建 StreamHandler → 彩色控制台
+
+# 业务模块只需一行
+logger = logging.getLogger(__name__)
+logger.info("训练开始")  # 自动冒泡到根 logger
+```
 
 ---
 
-## 3. 端到端全流程 (Architect 视角)
+## 第三章：端到端全流程
 
-### 3.1 完整训练+推理链路
+### 3.1 训练全链路（带层标注）
 
 ```
-数据准备阶段:
-  data/raw/rsod/              ← 原始数据存放位置
-  ├── images/                   原始图片
-  └── annotations/              Pascal VOC XML/COCO JSON/LabelMe JSON
-
-数据转换:
-  odp-transform --dataset rsod --format pascal_voc
-  → configs/datasets/rsod.yaml    ← YOLO 训练配置文件
-  → data/train/{images,labels}/  ← 转换后的 YOLO 格式训练集
-  → data/val/{images,labels}/    ← 验证集
-  → data/test/{images,labels}/   ← 测试集
-
-数据校验:
-  odp-validate --dataset rsod
-  → yaml_schema: nc=5 ✓          ← 数据集配置正确
-  → pair_existence: 100% ✓       ← 所有图片都有标签
-  → label_format: 100% ✓         ← 标签格式正确
-  → 报告: runs/data_validation/20260519_103000/
-
-模型训练:
+用户输入：
   odp-train --dataset rsod --model yolo11n.pt --epochs 100
-  → runs/experiments/rsod_baseline/
-      ├── config_snapshot.json    配置快照
-      ├── results.csv             逐轮指标
-      ├── weights/best.pt         最佳权重
-      ├── results.png             训练曲线
-      └── BoxPR_curve.png         PR 曲线
-  → data/models/checkpoints/best_rsod_baseline.pt
-
-模型评估:
-  odp-val --model runs/experiments/rsod_baseline/weights/best.pt --dataset rsod
-  → mAP50: 0.852, mAP50-95: 0.613, precision: 0.891, recall: 0.786
-
-模型推理:
-  odp-infer --model best.pt --source test.jpg
-  → runs/infer/infer_20260519_best/
-      ├── frame_000000.jpg       ← 标注图片
-      └── audit.json             ← 推理记录
+    │
+    ▼
+┌── CLI 层 ─────────────────────────────────────────────────┐
+│  cli/train.py                                              │
+│  ├── argparse 解析：dataset=rsod, model=yolo11n.pt,        │
+│  │               epochs=100, task=detect, batch=16...      │
+│  └── build_config(task="train", cli_args=overrides)        │
+└────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌── Config 层 ───────────────────────────────────────────────┐
+│  run_config/service.py                                      │
+│  ├── loader.load_yaml()       ← 读取 YAML 配置             │
+│  ├── merger.merge()           ← 三源合并 + 溯源            │
+│  ├── validator.validate()     ← 校验字段                   │
+│  └── → ConfigBundle(config, trace, errors)                 │
+└────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌── Service 层 ──────────────────────────────────────────────┐
+│  training/experiment.py                                     │
+│  ├── 创建 runs/experiments/rsod_baseline/                   │
+│  ├── 保存 config_snapshot.json                              │
+│  ├── TrainingHooks.on_train_start()                         │
+│  │   └── POST /api/experiments（静默降级）                  │
+│  ├── YOLO.train(**train_kwargs)                             │
+│  │   └── hooks.on_epoch_end() → POST epochs                 │
+│  ├── 复制 best.pt → checkpoints/best_rsod_baseline.pt       │
+│  └── → ExperimentResult(map50, map50_95, precision, recall) │
+└────────────────────────────────────────────────────────────┘
+    │
+    ▼
+  输出：
+  runs/experiments/rsod_baseline/
+    ├── config_snapshot.json   配置快照
+    ├── results.csv            逐轮指标
+    ├── weights/best.pt        最佳权重
+    ├── results.png            训练曲线
+    ├── BoxPR_curve.png        PR 曲线
+    ├── confusion_matrix.png   混淆矩阵
+    └── labels.jpg             类别分布
 ```
 
-### 3.2 WebUI 全链路
+### 3.2 推理全链路（带层标注）
 
 ```
-用户浏览器                    Gradio 进程                Python 核心库
-    │                            │                          │
-    ├─ 打开 http://127.0.0.1:7860                          │
-    │                            │                          │
-    │                            ├─ 加载 CSS 样式            │
-    │                            ├─ 创建 6 个用户 Tab       │
-    │                            │                          │
-    ├─ 上传图片 → 点击检测        │                          │
-    │                            ├─ _run_single_detection() │
-    │                            │                          ├─ Detector.detect()
-    │                            │                          ├─ draw_detections()
-    │                            │                          │
-    ├─ ← 显示标注图片 + 检测列表                             │
-    │                            │                          │
-    ├─ 输入"有什么模型" → 发送     │                          │
-    │                            ├─ run_agent()             │
-    │                            │   └─ 关键词匹配"模型"     │
-    │                            │                          ├─ tool_list_models()
-    │                            │   └─ _format_with_llm()  │
-    │                            │                          ├─ LLM API 调用
-    │                            │                          │
-    ├─ ← 显示"共 3 个模型: ..."                             │
-    │                            │                          │
-    ├─ 管理员登录 → 进入训练 Tab                              │
-    │                            ├─ create_training_ui()    │
-    │                            │   └─ 配置表单 → 启动训练  │
-    │                            │                          ├─ run_experiment()
-    │                            │                          │   ├─ YOLO.train()
-    │                            │                          │   └─ TrainingHooks
-    │                            │   └─ 实时日志流           │
-    │                            │                          │
-    ├─ ← 查看训练进度、结果曲线                               │
-    │                            │                          │
-    ├─ 点击"启动摄像头"                                      │
-    │                            ├─ _run_server_camera()    │
-    │                            │   ├─ cv2.VideoCapture()  │
-    │                            │   ├─ Detector.detect()   │
-    │                            │   ├─ draw_detections()   │
-    │                            │   └─ yield → gr.Image    │
-    │                            │                          │
-    ├─ ← 实时查看摄像头检测流                                 │
+用户输入：
+  odp-infer --source test.jpg --model best.pt --conf 0.25
+    │
+    ▼
+┌── CLI 层 ─────────────────────────────────────────────────┐
+│  cli/infer.py                                              │
+│  ├── argparse 解析：source, model, conf, iou, ...          │
+│  └── InferService.predict(cli_args={...})                  │
+└────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌── Service 层 ──────────────────────────────────────────────┐
+│  inference/service.py                                       │
+│  ├── create_frame_source("test.jpg")                       │
+│  │   → factory 识别 .jpg 后缀 → ImageSource               │
+│  ├── Detector("best.pt")                                   │
+│  │   → YOLO 加载 + warmup()                               │
+│  ├── 逐帧循环:                                             │
+│  │   ├── frame = source.read()                             │
+│  │   ├── result = detector.detect(frame.image)             │
+│  │   ├── rendered = draw_detections(frame, detections)     │
+│  │   └── 保存/显示                                         │
+│  └── → InferResult(stats, output_dir)                      │
+│                                                            │
+│  摄像头模式（--source 0 --threaded）:                       │
+│  ├── create_threaded_source("0")                           │
+│  │   → CameraSource + ThreadedSource（采集消费分离）       │
+│  ├── 同上逐帧循环                                          │
+│  └── 生成器 yield rendered → 实时流                        │
+└────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌── Core 层 ────────────────────────────────────────────────┐
+│  inference/engine.py                                       │
+│  Detector.detect():                                        │
+│  ├── YOLO(image, conf=0.25, iou=0.45, verbose=False)      │
+│  ├── 解析 results.boxes → Detection[]                      │
+│  │   └── Detection(class_id, class_name, confidence, bbox) │
+│  └── → InferenceResult(detections, inference_ms, shape)    │
+│                                                            │
+│  inference/visualizer.py                                   │
+│  draw_detections():                                        │
+│  └── cv2.rectangle + cv2.putText → 标注图片                │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 3.3 WebUI 全链路
+
+```
+用户浏览器 (http://127.0.0.1:7860)
+    │
+    ▼
+┌── Gradio 应用 (webui/app.py) ──────────────────────────────┐
+│  用户模式 6 Tab + 管理员模式 +5 Tab                         │
+│                                                            │
+│  [单图检测]: 用户上传图片 → 点击检测                         │
+│    → _run_single_detection(image, model_path, conf, iou)   │
+│      → _get_or_create_detector()  ← Core 层 Detector       │
+│      → detector.detect(image_np)                           │
+│      → draw_detections(image_np, detections)               │
+│      → 返回 (标注图片, JSON 明细, 状态) 到 Gradio           │
+│                                                            │
+│  [实时摄像头]: 用户点击启动                                  │
+│    → _run_server_camera(camera_id, model_path, ...)        │
+│      → cv2.VideoCapture(int(camera_id))                    │
+│      → 循环 yield rendered → gr.Image 流式更新             │
+│      → _server_cam_stop Event 控制停止                     │
+│                                                            │
+│  [LLM对话]: 用户输入"有什么模型"                             │
+│    → run_agent()  ← llm_agent.py                           │
+│      → 关键词匹配"模型" → tool_list_models()               │
+│      → _format_with_llm() → LLM 美化回复                    │
+│                                                            │
+│  [管理员→训练]: 填写参数 → 启动                             │
+│    → run_experiment(config)  ← Service 层                  │
+│    → 实时日志流 + 训练曲线                                  │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 3.4 WebUI 性能优化要点
+
+```python
+# 1. 模型缓存（避免切换 Tab 重复加载 YOLO）
+_detector_cache: dict[str, Detector] = {}
+_cache_lock = threading.Lock()
+
+# 2. 模型文件扫描缓存（5 秒 TTL，避免频繁扫描磁盘）
+@lru_cache(maxsize=1)
+def list_model_files(ttl: int = 5) -> list[str]: ...
+
+# 3. 摄像头单例管理（确保只有一个实例）
+_server_cap_ref = [None]
+_server_cap_lock = threading.Lock()
 ```
 
 ---
 
-## 4. Agent 智能助手系统
-
-### 4.1 架构设计
-
-`llm_agent.py` 实现关键词路由 + 本地工具执行 + LLM 排版：
+## 第四章：模块依赖与调用规则
 
 ```
-用户消息 → Intent Router（正则匹配）
+                    common/  ← 第5层：被所有模块依赖
+                        │
+        ┌───────────────┼────────────────┐
+        │               │                │
+   data_pipeline   data_validation   run_config  ← 第4层
+        │               │            (独立模块)
+        └───────┬───────┘                │
+                ▼                        │
+           training ◄────────────────────┘  ← 第2+3层
                 │
-    ┌───────────┼────────────┐
-    │           │            │
-  匹配工具    匹配推理     未匹配
-    │           │            │
-    ▼           ▼            ▼
- 本地函数   提取路径     普通 LLM 对话
- 执行工具   执行推理
-    │           │
-    └────┬──────┘
-         ▼
-  LLM 排版美化 → 自然语言回复
+                ▼
+           evaluation
+                │
+                ▼
+           inference ◄─── webui (外部)
+                │
+                ▼
+          cli/ (第1层) ──── 编排全部模块
 ```
 
-### 4.2 可用工具
+**调用规则**：
+1. **CLI 层**是唯一入口，编排全部业务模块
+2. **Service 层**编排 Core 层，一个函数完成一个完整用例
+3. **Core 层**实现单一业务逻辑，不跨模块调用
+4. **Config 层**独立于业务链，只被 Service 层调用
+5. **Common 层**被所有模块依赖，不依赖任何业务模块
+6. **禁止**：反向依赖、循环依赖、`sys.path.append`
 
-| 关键词 | 执行函数 | 功能 |
-|--------|---------|------|
-| `模型\|model\|.pt\|权重` | `tool_list_models()` | 列出 `checkpoints/` 下所有 .pt 模型及大小 |
-| `数据集\|dataset` | `tool_list_datasets()` | 列出所有数据集 YAML |
-| `实验\|训练\|exp` | `tool_list_experiments()` | 列出实验 + best mAP50 |
-| `推理\|检测\|识别` | `tool_run_inference()` | 自动提取模型+图片路径执行推理 |
-| `GPU\|显存\|cuda` | `tool_get_gpu_info()` | PyTorch GPU 显存状态 |
-
-### 4.3 为什么不用 LLM function calling？
-
-`deepseek-v4-flash` 对 OpenAI 格式 function calling 支持不稳定（忽略 tools 参数）。关键词路由后：
-
-- **100% 可靠**：工具执行不依赖 LLM
-- **即时响应**：0 token 开销，本地直接执行
-- LLM 只负责排版美化（一次 API 调用）
+**特殊说明**：
+- `training/` 的 Service 和 Core 合并在 `experiment.py`（薄 Service + 厚 Core）
+- `webui/` 不在五层之内，是 Gradio 前端，通过 import 调用 inference 和 training
+- `web-backend/` 是独立 FastAPI 服务，训练 hooks 通过 HTTP 同步数据
 
 ---
 
-## 5. 模块依赖关系图
+## 第五章：答辩 FAQ（按层组织）
 
-```
-                           common/
-                     (被所有模块依赖)
-                           │
-         ┌─────────────────┼──────────────────────┐
-         │                 │                      │
-    data_pipeline    data_validation          run_config
-         │                 │                  (独立模块)
-         └────────┬────────┘                      │
-                  ▼                               │
-             training ◄───────────────────────────┘
-                  │
-                  ▼
-             evaluation
-                  │
-                  ▼
-             inference ◄─── webui (Gradio)
-                  │
-                  ▼
-            CLI 入口 (cli/)
-                  │
-                  ▼
-           apps/web-backend/ (FastAPI, 可选)
-```
+### CLI 层
 
-**核心规则**：
-1. `common/` 是纯基础库，不依赖任何业务模块
-2. `run_config/` 独立于业务链，只被 CLI 和 training 调用
-3. 业务模块单向依赖：data_pipeline → data_validation → training → evaluation → inference
-4. `webui/` 直调 `inference/` 和 `training/`
-5. `cli/` 是唯一入口，编排各业务模块
+**Q: CLI 命令是怎么注册的？**
+`pyproject.toml` 的 `[project.scripts]` 段映射命令到函数。`pip install -e .` 后 pip 自动创建可执行脚本。
 
----
-
-## 6. 答辩 FAQ / 常见架构问题
-
-### Q1: 项目为什么是 Monorepo？
-
-Monorepo = 多个子项目在同一个仓库里（ODPlatform 有 `apps/platform/` 和 `apps/web-backend/`）。
-
-- 统一版本管理（一个 pyproject.toml 搞定 dev 工具）
-- 跨模块修改原子化（一个 commit = 所有改动）
-- 团队 < 5 人时，Monorepo 效率远高于多仓库
-
-### Q2: `.odp-workspace` marker 怎么工作？
-
-从 `__file__` 向上遍历父目录，找到包含该 marker 的目录即根目录。项目放任意路径都可用，无需硬编码。
-
-### Q3: CLI 命令是怎么注册的？
-
-`pyproject.toml` 的 `[project.scripts]` 段映射命令名到函数：
-```
+```toml
 odp-train = "odp_platform.cli.train:main"
 ```
-`pip install -e .` 后 pip 自动生成可执行脚本，每次执行 `odp-train` 实际调用 `train:main()`。
 
-### Q4: WebUI 用户/管理员怎么切换？
+**Q: 为什么 entry-point (`odp-train`) 和 `python -m odp_platform.cli.train` 两种方式？**
+entry-point 生成的是独立的可执行脚本（加入 PATH），`python -m` 是标准模块调用方式。前者更短的命令，后者用于调试。
 
-用户模式 6 Tab（检测/摄像头/模型/LLM），管理员加 5 Tab（Dashboard/训练/校验/配置/模型演示/数据集浏览）。密码在 `app.py` 校验，无法直接 URL 访问。
+**Q: CLI 参数怎么和 YAML 配置合并？**
+CLI 层只解析 argparse，不合并。把参数传给 `build_config(cli_args=...)`，由 Config 层的 `merger.py` 完成三源合并。
 
-### Q5: Agent 和 RAG 有什么区别？
+### Service 层
 
-RAG 查静态文档，Agent 执行实时代码。问"有什么模型"时 RAG 只能搜 README，Agent 直接扫描目录返回当前状态。
+**Q: 训练和推理的 Service 层设计差异？**
+- 训练：`experiment.py` 的 `run_experiment()` 是厚 Service（含 Core 逻辑）
+- 推理：`inference/service.py` 的 `InferService` 是薄 Service（编排 Core 层 Detector + frame_source）
+- 评估：`evaluation/service.py` 的 `ValService` 是极薄 Service（直接包装 YOLO.val()）
 
-### Q6: 训练性能优化做了什么？
+**Q: WebUI 调 Service 层还是 Core 层？**
+WebUI 直接调 Core 层（`_get_or_create_detector` → `Detector.detect`），没有中间 Service。这是 WebUI 的实际情况，技术上可以再加一层 WebUI Service，但当前 5 人团队直接调 Core 更高效。
 
-1. GPU JIT 预热（消除首次 CUDA 编译延迟）
-2. WebUI 模型缓存（`_detector_cache`，切换 Tab 不重载）
-3. EarlyStopping（patience=50，自动停止无效训练）
-4. AMP 混合精度（默认开启，减少~40% 显存占用）
-5. 模型列表 5 秒 TTL 缓存（`lru_cache`）
+### Core 层
 
-### Q7: CSV 列名适配器干什么的？
+**Q: 注册表模式解决了什么问题？**
+消除 if/elif 分支。新增格式只需新建文件 + 加装饰器，不改旧代码。
 
-Ultralytics 升级时常改 CSV 列名（如 `metrics/mAP50(B)` → `mAP50`）。`_COLUMN_ALIASES` 映射表做兼容，升级 YOLO 只需加一行映射。
+```python
+# 不加注册表前——每新增格式要改 factory
+def convert(format_name, ...):
+    if format_name == "pascal_voc": ...
+    elif format_name == "coco": ...
+    elif format_name == "labelme": ...  # 改这行
 
-### Q8: 帧源注册表模式是什么？
+# 加注册表后——新增格式不碰现有代码
+@register("labelme")
+def convert_labelme(...): ...
+```
 
-`factory.py` 有个 `_SOURCE_REGISTRY` dict，`@register_source("name")` 装饰器自动注册。新增 RTSP 源只需 `@register_source("rtsp") class RTSPSource`，不用改 factory。
+**Q: data_pipeline 和 data_validation 的注册表有什么区别？**
+- data_pipeline 是 **互斥分发**：按格式选 1 个 converter
+- data_validation 是 **聚合执行**：跑全部 check，一个 ERROR 不影响其他 check 继续
 
-### Q9: 后端不可达会怎样？
+**Q: frame_source 的职责边界？**
+只做"帧输入"（open/read/close），不做推理、不做可视化。新增 RTSP 源只需 `@register_source("rtsp")` + 实现 FrameSource 抽象类。
 
-不会。所有网络请求都有 3 秒超时 + try/except + 静默降级：
+### Config 层
+
+**Q: 三源合并的覆盖顺序？**
+CLI 参数（最高）> YAML 文件 > 代码默认值（最低）。每个字段的溯源链由 `TraceRecord` 记录。
+
+**Q: 为什么不用 Pydantic 而用 ConfigField 注册表？**
+Pydantic 模型是"任务为中心"，同名字段在不同任务有不同默认值时，继承体系复杂。ConfigField 是"字段为中心"，每个字段独立定义，同名字段首次注册胜出。
+
+**Q: 配置快照的用途？**
+1. 实验复现：`restore_from_snapshot()` 恢复历史配置
+2. 来源追溯：`odp-config trace` 查字段来源
+3. 回滚保护：错误配置可快速回滚
+
+### Common 层
+
+**Q: marker 文件定位为什么优于硬编码？**
+项目可放在任意路径，移动后不需改代码。硬编码绝对路径不可移植，`os.getcwd()` 依赖运行目录。
+
+**Q: logging 的幂等保护怎么实现的？**
+```python
+if logger.handlers:
+    return logger  # 重复调用不重复添加 handler
+```
+防止多次初始化导致日志重复输出。
+
+### 跨模块
+
+**Q: CLI 和 WebUI 调的是同一套代码吗？**
+是。`odp-infer` CLI 和 WebUI 单图检测都调 `inference/engine.py` 的 `Detector.detect()`。`odp-train` CLI 和管理员训练 Tab 都调 `training/experiment.py` 的 `run_experiment()`。
+
+**Q: 后端不可达会怎样？**
+训练不受影响。所有 HTTP 调用有 3 秒超时 + try/except + 静默降级：
 ```python
 try:
     requests.post(url, timeout=3)
 except RequestException:
-    logger.warning("后端不可达")
+    logger.warning("后端不可达，实验仅保存在本地")
 ```
-训练继续、指标写本地 CSV，后端恢复后可手动同步。
 
-### Q10: CUDA OOM 怎么办？
+**Q: CUDA OOM 怎么办？**
+1. 降 batch（最有效）2. 降 imgsz 3. 开 AMP（默认已开）4. `device="cpu"` 回退
 
-1. 降 batch（最有效）
-2. 降 imgsz（640→416）
-3. 开 AMP（默认已开）
-4. `device="cpu"` 回退 CPU
-5. `torch.cuda.empty_cache()`
-
-### Q11: 数据管道注册表怎么用？
-
-```python
-@register("my_format", supported_tasks=("detect",))
-def convert_my_format(input_dir, output_labels_dir, options):
-    # 实现转换逻辑
-    return class_names  # 返回类别名列表
-```
-自动注册到 `_REGISTRY`，`service.py` 查询调用。新增格式=写一个文件+加个装饰器。
-
-### Q12: CLI 和 WebUI 调用的是同一套代码吗？
-
-是。`odp-train` CLI 和 WebUI 训练 Tab 最终都调 `training/experiment.py` 的 `run_experiment()`。推理也同理，`odp-infer` 和 WebUI 4 个检测 Tab 都调 `inference/engine.py` 的 `Detector.detect()`。
+**Q: 最大的架构亮点和隐患？**
+亮点：五层架构清晰，注册表模式保证扩展性，运行时不依赖后端。隐患：training 模块 Service+Core 混合，WebUI 直调 Core 层略过 Service，长期迭代需重构。
 
 ---
 
-## 7. 学习路线图
+## 第六章：学习路线图
 
-### 7.1 按模块优先级
+### 6.1 按层学习顺序
 
-| 优先级 | 模块 | 核心文件 | 预计时间 |
-|:------:|------|---------|:--------:|
-| ⭐⭐⭐ | `common/` | paths.py, logging_utils.py | 2h |
-| ⭐⭐⭐ | `data_pipeline/` | registry.py, orchestrator.py | 3h |
-| ⭐⭐⭐ | `cli/` | 全部 10 个命令 | 2h |
-| ⭐⭐ | `training/` | experiment.py, callbacks.py | 2h |
-| ⭐⭐ | `inference/` | engine.py, frame_source/ | 2h |
-| ⭐⭐ | `webui/` | app.py, user_tabs.py, utils.py | 2h |
-| ⭐ | `run_config/` | service.py, merger.py | 1h |
-| ⭐ | `data_validation/` | service.py, checks/*.py | 1h |
-| ⭐ | `evaluation/` | service.py | 0.5h |
+| 优先级 | 层 | 核心文件 | 预计时间 | 理由 |
+|:------:|----|---------|:--------:|------|
+| ⭐⭐⭐ | Common | paths.py, logging_utils.py | 2h | 一切的基础 |
+| ⭐⭐⭐ | Config | run_config/service.py, merger.py | 2h | 理解三源合并 |
+| ⭐⭐⭐ | CLI | cli/ 全部 10 个命令 | 2h | 理解入口 |
+| ⭐⭐⭐ | Service+Core | data_pipeline/ | 3h | 注册表模式范例 |
+| ⭐⭐ | Service+Core | training/experiment.py, callbacks.py | 2h | 训练核心 |
+| ⭐⭐ | Service+Core | inference/engine.py, service.py, frame_source/ | 3h | 推理体系 |
+| ⭐ | Service | data_validation/service.py, checks/ | 1h | 质量保障 |
+| ⭐ | Service | evaluation/service.py | 0.5h | 模型评估 |
 
-### 7.2 推荐阅读顺序
+### 6.2 答辩重点准备
 
-1. `common/paths.py` — 路径是一切的基础
-2. `common/logging_utils.py` — 理解日志体系
-3. `cli/transform_data.py` + `data_pipeline/` — 数据是训练的前提
-4. `training/experiment.py` + `training/callbacks.py` — 训练核心
-5. `apps/platform/src/odp_platform/inference/engine.py` + `inference/frame_source/` — 推理体系
-6. `webui/app.py` + `webui/user_tabs.py` — 前端集成
-7. `run_config/` — 配置管理
-8. `data_validation/` — 质量保障
+参考 [docs/ODPlatform_答辩演练问题集.md](docs/ODPlatform_答辩演练问题集.md)，高频考点 Top 5：
+
+1. **五层架构数据流**（Q1-1）：CLI→Service→Core→Config→Common，用 `odp-train` 举例
+2. **三源合并 + 溯源**（Q5-1/Q5-2）：默认值→YAML→CLI，TraceRecord 记录来源
+3. **全流程数据追踪**（Q8-1）：从前端到后端完整走一遍
+4. **Monorepo 优劣**（Q1-2）：统一版本、原子提交、共享基础设施
+5. **注册表调度模式**（Q4-4）：data_pipeline 互斥分发 vs data_validation 聚合执行
+
+### 6.3 推荐阅读路径
+
+```
+① common/paths.py           ← marker 路径探测
+② common/logging_utils.py   ← 日志体系
+③ run_config/service.py     ← 三源合并配置
+④ data_pipeline/registry.py + orchestrator.py  ← 注册表模式范例
+⑤ training/experiment.py + callbacks.py         ← 训练核心
+⑥ inference/engine.py + frame_source/           ← 推理体系
+⑦ cli/train.py + infer.py                       ← CLI 入口
+⑧ webui/app.py + user_tabs.py                   ← 前端集成
+⑨ data_validation/service.py + checks/          ← 质量保障
+```
