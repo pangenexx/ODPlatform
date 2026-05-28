@@ -1038,11 +1038,17 @@ div.chatbot [class*="user"] *,
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  flex: unset !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
   max-width: none !important;
-  min-height: 0 !important;
-  height: auto !important;
+  min-height: 100vh !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
 }
 
 .odp-admin-modal.odp-modal-hidden {
@@ -1235,6 +1241,15 @@ body.dark,
   max-width: 100% !important; max-height: 65vh !important;
   width: auto !important; height: auto !important;
   object-fit: contain !important;
+  cursor: default !important;
+}
+[data-testid="image-lightbox"] {
+  display: none !important;
+}
+button[aria-label="全屏"],
+button[aria-label="Fullscreen"],
+button:has(svg[data-testid="FullscreenIcon"]) {
+  display: none !important;
 }
 
 """
@@ -1276,7 +1291,6 @@ def _create_admin_tabs() -> None:
 
 _JS_SETUP = """
 <style>
-/* ── 管理员弹窗 ── */
 .odp-admin-modal {
   position: fixed !important;
   inset: 0 !important;
@@ -1288,6 +1302,17 @@ _JS_SETUP = """
   border: 0 !important;
   border-radius: 0 !important;
   background: rgba(248, 250, 255, 0.85) !important;
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 100vh !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
 }
 .odp-admin-modal.odp-modal-hidden { display: none !important; }
 </style>
@@ -1344,15 +1369,17 @@ def create_app() -> gr.Blocks:
                 elem_classes=["odp-sidebar-toggle-wrap"],
             )
             gr.HTML(
-                """
-                <section class="odp-title-art" aria-label="低空智瞰 航拍智能目标识别与检测系统">
-                    <span class="odp-logo-mark" aria-hidden="true"></span>
-                    <span class="odp-brand-copy">
-                        <strong>低空智瞰</strong>
-                        <small>航拍智能目标识别与检测系统</small>
-                    </span>
-                </section>
-                """,
+                '<section class="odp-title-art" aria-label="低空智瞰 航拍智能目标识别与检测系统" style="cursor:pointer"'
+                ' onclick="'
+                "var t=document.querySelectorAll('[role=tablist] button[role=tab]');"
+                "if(t.length>0)t[0].click();"
+                '" title="点击回到首页">'
+                '<span class="odp-logo-mark" aria-hidden="true"></span>'
+                '<span class="odp-brand-copy">'
+                "<strong>低空智瞰</strong>"
+                "<small>航拍智能目标识别与检测系统</small>"
+                "</span>"
+                "</section>",
                 elem_classes=["odp-title"],
             )
             with gr.Column(visible=True, elem_classes=["odp-user-layer"]):

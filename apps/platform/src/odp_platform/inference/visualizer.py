@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Optional, Dict, Tuple
 
 from .engine import Detection
-from .frame_source.overlay import FPSCounter, Metrics, draw_hud
+from .frame_source.overlay import FPSCounter, Metrics, draw_hud, RateCounter
 
 
 def draw_detections(image: np.ndarray, detections: List[Detection], color_map: dict = None) -> np.ndarray:
@@ -103,11 +103,20 @@ def draw_info_panel(
     resolution: Optional[Tuple[int, int]] = None,
 ) -> np.ndarray:
     """在画面左上角绘制半透明信息面板。"""
-    return draw_hud(
-        image=image,
-        loop_fps=fps,
-        infer_ms=infer_ms,
-        frame_index=frame_index,
-        num_detections=num_detections,
-        resolution=resolution,
-    )
+    vis = image.copy()
+    h, w = vis.shape[:2]
+
+    metrics = Metrics()
+    if fps > 0:
+        metrics.loop.add(int(fps * 2), 2.0)
+        metrics.current.add(1, 1.0 / fps if fps > 0 else 0)
+    if infer_ms > 0:
+        metrics.infer.update(infer_ms)
+
+    draw_hud(vis, metrics, n_dets=num_detections, show_info=True)
+
+    res_text = f"{w}x{h}" if resolution is None else f"{resolution[0]}x{resolution[1]}"
+    cv2.putText(vis, f"Frame {frame_index} | {res_text}",
+                (12, h - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+
+    return vis

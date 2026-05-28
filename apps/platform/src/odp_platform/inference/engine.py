@@ -129,3 +129,17 @@ class Detector:
             logger.debug("warmup 完成，无检测结果（预期行为）")
         elif len(result.detections) > 0:
             logger.warning(f"warmup 在纯黑图上检测到 {len(result.detections)} 个目标，请检查 conf 阈值")
+
+    def release(self):
+        """释放模型占用的 GPU 显存。"""
+        if self._model is not None:
+            try:
+                import gc
+                if hasattr(self._model, 'predict'):
+                    self._model.predict = None
+                self._model = None
+                gc.collect()
+                torch.cuda.empty_cache()
+                logger.debug("模型显存已释放")
+            except Exception as exc:
+                logger.warning("释放模型显存时出错: %s", exc)

@@ -264,11 +264,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ultralytics_args["name"] = experiment_name
     exp_dir = RUNS_DIR / "experiments" / experiment_name
 
-    hooks = TrainingHooks()
     config_json = json.dumps(ultralytics_args, ensure_ascii=False)
+    hooks = TrainingHooks(experiment_name=experiment_name, config_json=config_json)
     hooks.on_train_start(
-        name=experiment_name,
-        config_json=config_json,
         dataset=dataset,
         model=ultralytics_args.get("model", "yolo11n.pt"),
     )
