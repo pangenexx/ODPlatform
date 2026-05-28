@@ -483,39 +483,21 @@ def _chat(
         history.append({"role": "assistant", "content": "请先填写 API Key"})
         return history, ""
 
-    history.append({"role": "user", "content": text})
-
     if enable_tools:
         try:
             from odp_platform.webui.llm_agent import run_agent
-
-            messages = [{"role": "system", "content": _AGENT_SYSTEM_PROMPT}]
-            for msg in history:
-                messages.append({"role": msg["role"], "content": msg["content"]})
-
-            content = run_agent(messages, api_key, api_base, model_name)
+            return run_agent(text, history, api_key, api_base, model_name)
         except ImportError as exc:
-            content = f"Agent 模块未就绪: {exc}"
+            history.append({"role": "assistant", "content": f"Agent 模块未就绪: {exc}"})
+            return history, ""
         except Exception as exc:
-            content = f"Agent 执行异常: {exc}"
-    else:
-        content = _simple_chat(history, api_key, api_base, model_name)
+            history.append({"role": "assistant", "content": f"Agent 执行异常: {exc}"})
+            return history, ""
 
+    history.append({"role": "user", "content": text})
+    content = _simple_chat(history, api_key, api_base, model_name)
     history.append({"role": "assistant", "content": content})
     return history, ""
-
-
-_AGENT_SYSTEM_PROMPT = """你是基于 DeepSeek 模型的 ODPlatform 智能助手（不是 OpenAI），可以帮助用户完成以下任务：
-
-1. 列出可用的模型 (list_models)
-2. 列出可用的数据集 (list_datasets)
-3. 列出训练实验及最佳指标 (list_experiments)
-4. 查看实验详情 (get_experiment)
-5. 对单张图片执行推理检测 (run_inference)
-6. 查看 GPU 状态 (get_gpu_info)
-
-根据用户的问题选择合适的工具来帮助用户。如果用户问的问题不需要工具，直接回答即可。
-所有路径相关的回复请使用完整路径。"""
 
 
 def _simple_chat(
@@ -1225,9 +1207,9 @@ def create_llm_chat_ui() -> None:
                 placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
-    with gr.Row():
+    with gr.Row(elem_classes=["odp-agent-toggle"]):
         enable_tools = gr.Checkbox(
-            label="启用 Agent 工具（推理/模型/实验查询）",
+            label="✅ Agent 工具已启用（模型/实验/推理/GPU）",
             value=True,
             scale=1,
         )

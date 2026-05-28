@@ -1162,6 +1162,31 @@ div.chatbot [class*="user"] *,
   flex: 1 !important;
 }
 
+/* ── Agent 工具开关 ── */
+.odp-agent-toggle label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 16px !important;
+  border-radius: 10px !important;
+  background: #e8f5e9 !important;
+  border: 2px solid #4caf50 !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
+  cursor: pointer !important;
+  transition: all 0.2s !important;
+}
+.odp-agent-toggle input[type="checkbox"] {
+  width: 20px !important;
+  height: 20px !important;
+  accent-color: #2e7d32 !important;
+  cursor: pointer !important;
+}
+.odp-agent-toggle label:has(input:not(:checked)) {
+  background: #f5f5f5 !important;
+  border-color: #bdbdbd !important;
+}
+
 @media (max-width: 1180px) {
   .odp-row-action,
   .odp-row-three,
