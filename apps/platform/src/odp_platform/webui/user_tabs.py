@@ -473,6 +473,7 @@ def _chat(
     api_key: str,
     api_base: str,
     model_name: str,
+    enable_tools: bool,
 ) -> tuple[list[dict[str, str]], str]:
     text = (message or "").strip()
     history = list(history or [])
@@ -484,6 +485,45 @@ def _chat(
 
     history.append({"role": "user", "content": text})
 
+    if enable_tools:
+        try:
+            from odp_platform.webui.llm_agent import run_agent
+
+            messages = [{"role": "system", "content": _AGENT_SYSTEM_PROMPT}]
+            for msg in history:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+
+            content = run_agent(messages, api_key, api_base, model_name)
+        except ImportError as exc:
+            content = f"Agent 模块未就绪: {exc}"
+        except Exception as exc:
+            content = f"Agent 执行异常: {exc}"
+    else:
+        content = _simple_chat(history, api_key, api_base, model_name)
+
+    history.append({"role": "assistant", "content": content})
+    return history, ""
+
+
+_AGENT_SYSTEM_PROMPT = """你是 ODPlatform 的智能助手，可以帮助用户完成以下任务：
+
+1. 列出可用的模型 (list_models)
+2. 列出可用的数据集 (list_datasets)
+3. 列出训练实验及最佳指标 (list_experiments)
+4. 查看实验详情 (get_experiment)
+5. 对单张图片执行推理检测 (run_inference)
+6. 查看 GPU 状态 (get_gpu_info)
+
+根据用户的问题选择合适的工具来帮助用户。如果用户问的问题不需要工具，直接回答即可。
+所有路径相关的回复请使用完整路径。"""
+
+
+def _simple_chat(
+    history: list[dict[str, str]],
+    api_key: str,
+    api_base: str,
+    model_name: str,
+) -> str:
     import json
     import urllib.error
     import urllib.request
@@ -517,15 +557,12 @@ def _chat(
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
+            return data["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        content = f"API 请求失败 ({exc.code}): {body[:300]}"
+        return f"API 请求失败 ({exc.code}): {body[:300]}"
     except Exception as exc:
-        content = f"请求异常: {exc}"
-
-    history.append({"role": "assistant", "content": content})
-    return history, ""
+        return f"请求异常: {exc}"
 
 
 def _clear_chat() -> tuple[list[dict[str, str]], str]:
@@ -1188,22 +1225,23 @@ def create_llm_chat_ui() -> None:
                 placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
+    with gr.Row(elem_classes=["odp-row"]):
+        enable_tools = gr.Checkbox(
+            label="启用 Agent 工具（推理/模型/实验查询）",
+            value=True,
+            scale=1,
+        )
     chatbot = gr.Chatbot(label="对话", height=400)
     message = gr.Textbox(label="输入", placeholder="输入问题，按Enter发送", max_lines=3)
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         send_btn = gr.Button("发送", variant="primary", scale=1)
         clear_btn = gr.Button("清空对话", scale=1)
 
-    send_btn.click(
-        fn=_chat,
-        inputs=[message, chatbot, api_key, api_base, model_name],
-        outputs=[chatbot, message],
-    )
-    message.submit(
-        fn=_chat,
-        inputs=[message, chatbot, api_key, api_base, model_name],
-        outputs=[chatbot, message],
-    )
+    inputs = [message, chatbot, api_key, api_base, model_name, enable_tools]
+    outputs = [chatbot, message]
+
+    send_btn.click(fn=_chat, inputs=inputs, outputs=outputs)
+    message.submit(fn=_chat, inputs=inputs, outputs=outputs)
     clear_btn.click(fn=_clear_chat, outputs=[chatbot, message])
 
 

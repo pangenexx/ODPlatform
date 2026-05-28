@@ -19,6 +19,7 @@ from odp_platform.common.paths import (
     dataset_yaml_path,
 )
 from odp_platform.training import TrainingHooks
+from odp_platform.training.callbacks import _safe_float, normalize_csv_row
 
 
 logger = get_logger(
@@ -29,41 +30,6 @@ logger = get_logger(
 
 
 BACKEND_URL = "http://127.0.0.1:8000"
-
-
-# =========================================================
-# CSV column name adapter — 兼容不同 Ultralytics 版本
-# =========================================================
-
-_COLUMN_ALIASES: dict[str, str] = {
-    "metrics/mAP50(B)": "map50",
-    "metrics/mAP50-95(B)": "map50_95",
-    "metrics/precision(B)": "precision",
-    "metrics/recall(B)": "recall",
-    "train/box_loss": "box_loss",
-    "val/box_loss": "val_box_loss",
-    "train/cls_loss": "cls_loss",
-    "val/cls_loss": "val_cls_loss",
-    "train/dfl_loss": "dfl_loss",
-    "val/dfl_loss": "val_dfl_loss",
-    "lr/pg0": "lr",
-    "epoch": "epoch",
-}
-
-
-def _normalize_csv_row(row: dict[str, str]) -> dict[str, str]:
-    """将 Ultralytics CSV 列名映射为规范名，兼容版本差异。"""
-    normalized: dict[str, str] = {}
-    for raw_col, value in row.items():
-        col = raw_col.strip()
-        mapped = _COLUMN_ALIASES.get(col)
-        if mapped is not None:
-            normalized[mapped] = value
-        else:
-            normalized[col] = value
-    if not normalized or not any(k in _COLUMN_ALIASES.values() for k in normalized):
-        logger.warning("CSV 列名不匹配，当前列: %s", list(row.keys()))
-    return normalized
 
 
 # =========================================================
@@ -126,13 +92,6 @@ class ExperimentResult:
 # Utils
 # =========================================================
 
-def _safe_float(v: Any) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return 0.0
-
-
 def _parse_metrics(csv_path: Path) -> dict:
     """解析 Ultralytics results.csv，自动适配列名变化。"""
     if not csv_path.exists():
@@ -147,7 +106,7 @@ def _parse_metrics(csv_path: Path) -> dict:
         logger.warning("results.csv 为空")
         return {}
 
-    last = _normalize_csv_row(rows[-1])
+    last = normalize_csv_row(rows[-1])
 
     return {
         "epoch": int(float(last.get("epoch", 0))),

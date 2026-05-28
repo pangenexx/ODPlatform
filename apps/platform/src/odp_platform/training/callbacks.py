@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import csv
 import shutil
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -28,6 +29,48 @@ BACKEND_URL = "http://127.0.0.1:8000"
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0
+
+
+# =========================================================
+# CSV column name adapter — 兼容不同 Ultralytics 版本
+# =========================================================
+
+_COLUMN_ALIASES: dict[str, str] = {
+    "metrics/mAP50(B)": "map50",
+    "metrics/mAP50-95(B)": "map50_95",
+    "metrics/precision(B)": "precision",
+    "metrics/recall(B)": "recall",
+    "train/box_loss": "box_loss",
+    "val/box_loss": "val_box_loss",
+    "train/cls_loss": "cls_loss",
+    "val/cls_loss": "val_cls_loss",
+    "train/dfl_loss": "dfl_loss",
+    "val/dfl_loss": "val_dfl_loss",
+    "lr/pg0": "lr",
+    "epoch": "epoch",
+}
+
+
+def normalize_csv_row(row: dict[str, str]) -> dict[str, str]:
+    """将 Ultralytics CSV 列名映射为规范名，兼容版本差异。"""
+    normalized: dict[str, str] = {}
+    for raw_col, value in row.items():
+        col = raw_col.strip()
+        mapped = _COLUMN_ALIASES.get(col)
+        if mapped is not None:
+            normalized[mapped] = value
+        else:
+            normalized[col] = value
+    if not normalized or not any(k in _COLUMN_ALIASES.values() for k in normalized):
+        logger.warning("CSV 列名不匹配，当前列: %s", list(row.keys()))
+    return normalized
+
+
+def _safe_float(v: Any) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
 
 
 # =========================================================
@@ -401,6 +444,35 @@ class TrainingHooks:
 
             payload,
 
+            label=f"epoch_{epoch}",
+        )
+
+    # -----------------------------------------------------
+
+    def on_epoch_end_from_csv_row(
+        self,
+        row: dict[str, str],
+    ):
+        """从 results.csv 的一行解析指标并同步到后端。
+
+        Args:
+            row: csv.DictReader 的一行数据（原始列名）
+        """
+        if self.exp_id is None:
+            return
+
+        normalized = normalize_csv_row(row)
+
+        epoch = int(float(normalized.get("epoch", 0)))
+        metrics = {
+            k: _safe_float(normalized.get(k, 0))
+            for k in ("box_loss", "val_box_loss", "map50", "map50_95", "precision", "recall", "lr")
+        }
+
+        payload = {"epoch": epoch, **metrics}
+        _post_with_retry(
+            f"{BACKEND_URL}/api/experiments/{self.exp_id}/epochs",
+            payload,
             label=f"epoch_{epoch}",
         )
 
