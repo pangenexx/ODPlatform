@@ -560,7 +560,7 @@ def _run_video_detection(
     max_frames: int,
 ) -> tuple:
     if not video_path or not model_path:
-        return [], "请上传视频并选择模型", [], {}, 0
+        return [], "请上传视频并选择模型", [], {}
 
     try:
         import os
@@ -571,12 +571,12 @@ def _run_video_detection(
 
         from odp_platform.inference.visualizer import draw_detections
     except ImportError as exc:
-        return [], f"依赖未就绪: {exc}", [], {}, 0
+        return [], f"依赖未就绪: {exc}", [], {}
 
     try:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return [], f"无法打开视频: {video_path}", [], {}, 0
+            return [], f"无法打开视频: {video_path}", [], {}
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
@@ -614,7 +614,7 @@ def _run_video_detection(
                 show_info=False,
             )
             status = f"视频处理完成 | 耗时: {result_obj.infer_time:.1f}s | 输出: {result_obj.output_dir}"
-            return [], status, [], {}, 0
+            return [], status, [], {}
         except ImportError:
             pass
         except Exception as exc:
@@ -623,7 +623,7 @@ def _run_video_detection(
         # Fallback: frame-by-frame with cv2
         detector = _get_or_create_detector(model_path, conf, iou)
         if detector is None:
-            return [], "模型加载失败", [], {}, 0
+            return [], "模型加载失败", [], {}
 
         cap = cv2.VideoCapture(video_path)
         frame_idx = 0
@@ -652,7 +652,7 @@ def _run_video_detection(
                     class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
                 total_objs += len(result.detections)
 
-                if len(sample_frames) < 20:
+                if len(sample_frames) < 2000:
                     sample_frames.append(rendered)
 
                 frame_details.append({
@@ -681,11 +681,11 @@ def _run_video_detection(
         }
         status = (f"完成: {processed_count}/{frame_idx} 帧 | {total_objs} 个目标 | "
                   f"平均 {avg_ms:.0f}ms/帧 | 等效FPS: {processed_count/max(elapsed_total,0.001):.1f}")
-        return sample_frames, status, frame_details, summary, processed_count
+        return sample_frames, status, frame_details, summary
 
     except Exception as exc:
         logger.exception("视频检测失败")
-        return [], f"视频检测失败: {exc}", [], {}, 0
+        return [], f"视频检测失败: {exc}", [], {}
 
 
 def create_single_detection_ui() -> None:
@@ -766,7 +766,6 @@ def create_folder_detection_ui() -> None:
             headers=["文件名", "检测数", "类别", "平均置信度", "耗时(ms)"],
             value=[],
             interactive=False,
-            wrap=True,
         )
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
@@ -804,7 +803,7 @@ def create_video_detection_ui() -> None:
             )
         with gr.Column(scale=2):
             video_gallery = gr.Gallery(
-                label="检测结果抽样（最多20帧）", columns=4, height=480,
+                label="检测结果预览", columns=4, height=480,
                 object_fit="contain",
             )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
@@ -814,14 +813,13 @@ def create_video_detection_ui() -> None:
             headers=["帧", "目标数", "耗时(ms)", "类别"],
             value=[],
             interactive=False,
-            wrap=True,
         )
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
     detect_btn.click(
         fn=_run_video_detection,
         inputs=[video_in, model_dd, conf_slider, iou_slider, frame_interval, max_frames],
-        outputs=[video_gallery, video_status, video_detail, video_summary, gr.Progress()],
+        outputs=[video_gallery, video_status, video_detail, video_summary],
     )
 
 
@@ -842,10 +840,10 @@ def create_live_camera_ui() -> None:
 
     gr.Markdown("### Web 摄像头（浏览器端）")
     gr.Markdown(
-        "💡 点击下方摄像头画面，浏览器弹出权限请求时点击「允许」，画面出现后自动开始逐帧推理。"
+        "💡 摄像头画面实时显示检测结果，无需手动拍照。"
     )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        webcam_in = gr.Image(sources="webcam", type="numpy", label="摄像头")
+        webcam_in = gr.Image(sources="webcam", type="numpy", streaming=True, mirror_webcam=False, label="摄像头")
         webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
 
     gr.Markdown("---")
@@ -949,14 +947,14 @@ def create_llm_chat_ui() -> None:
         with gr.Column(scale=1):
             api_base = gr.Textbox(
                 label="API Base URL",
-                value="https://api.deepseek.com/beta",
+                value="https://api.deepseek.com",
                 scale=1,
             )
         with gr.Column(scale=1):
             model_name = gr.Textbox(
                 label="模型名称",
-                value="deepseek-chat",
-                placeholder="输入模型名，如 deepseek-chat、gpt-4o、deepseek-r1",
+                value="deepseek-v4-flash",
+                placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
     chatbot = gr.Chatbot(label="对话", height=400)
