@@ -505,7 +505,7 @@ def _chat(
     return history, ""
 
 
-_AGENT_SYSTEM_PROMPT = """你是 ODPlatform 的智能助手，可以帮助用户完成以下任务：
+_AGENT_SYSTEM_PROMPT = """你是基于 DeepSeek 模型的 ODPlatform 智能助手（不是 OpenAI），可以帮助用户完成以下任务：
 
 1. 列出可用的模型 (list_models)
 2. 列出可用的数据集 (list_datasets)
@@ -531,7 +531,7 @@ def _simple_chat(
     base = api_base.rstrip("/")
     url = f"{base}/chat/completions"
 
-    messages = [{"role": "system", "content": "你是一个有用的AI助手。"}]
+    messages = [{"role": "system", "content": "你是 DeepSeek 模型，不是 OpenAI。你是一个有用的AI助手。"}]
     for msg in history:
         role = msg.get("role", "user")
         content = msg.get("content", "")
@@ -1225,7 +1225,7 @@ def create_llm_chat_ui() -> None:
                 placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
-    with gr.Row(elem_classes=["odp-row"]):
+    with gr.Row():
         enable_tools = gr.Checkbox(
             label="启用 Agent 工具（推理/模型/实验查询）",
             value=True,

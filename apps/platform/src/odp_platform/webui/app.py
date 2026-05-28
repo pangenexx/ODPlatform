@@ -1576,8 +1576,9 @@ def _ensure_backend_running(timeout: float = 10.0) -> bool:
 def main() -> None:
     import threading
     threading.Thread(target=_ensure_backend_running, daemon=True).start()
+    print(f"🌐 浏览器访问: http://127.0.0.1:7860")
     create_app().launch(
-        server_name="0.0.0.0",
+        server_name="127.0.0.1",
         server_port=7860,
         css=APP_CSS,
         allowed_paths=[str(ASSETS_DIR)],
