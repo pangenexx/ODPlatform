@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Iterator, Optional, List, Union, Tuple
 import numpy as np
@@ -18,6 +19,12 @@ from .frame_source import (
 
 class ImageSource:
     def __init__(self, source: Union[str, Path, int]):
+        warnings.warn(
+            "odp_platform.inference.sources.ImageSource 已废弃，"
+            "请使用 odp_platform.inference.frame_source.sources.image.ImageSource",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.source = source
         self._inner = create_frame_source(str(source) if not isinstance(source, int) else source)
         self._inner.open()

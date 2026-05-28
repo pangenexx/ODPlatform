@@ -2,12 +2,10 @@
 # @FileName  : hooks.py
 # @Time      : 2026/5/25
 # @Project   : ODPlatform
-# @Function  : 训练侧客户端 SDK —— 供 callbacks.py 引用
+# @Function  : （已废弃）训练侧客户端 SDK
 #
-# 使用方式（训练工程师在 callbacks.py 中）:
-#   from hooks import on_training_start, on_epoch_end, on_training_end
-#
-# 约定: 函数签名不变，后端负责 HTTP 细节，训练侧不关心 API 路径。
+# 此文件已废弃，请使用 apps/platform/src/odp_platform/training/callbacks.py 的 TrainingHooks。
+# 保留仅作历史参考，后续版本将被删除。
 
 from __future__ import annotations
 
