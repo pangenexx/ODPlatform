@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -173,6 +174,11 @@ def list_config_files() -> list[str]:
 
 
 def list_model_files() -> list[str]:
+    _cache_key = "_model_files"
+    now = time.time()
+    cached = getattr(list_model_files, _cache_key, None)
+    if cached is not None and (now - cached["ts"]) < 5.0:
+        return cached["data"]
     roots = [CHECKPOINTS_DIR, ROOT_DIR / "models" / "checkpoints"]
     seen: set[Path] = set()
     models: list[str] = []
@@ -183,7 +189,9 @@ def list_model_files() -> list[str]:
                 continue
             seen.add(resolved)
             models.append(str(path))
-    return sorted(models)
+    result = sorted(models)
+    setattr(list_model_files, _cache_key, {"data": result, "ts": now})
+    return result
 
 
 def file_mtime(path: Path) -> str:

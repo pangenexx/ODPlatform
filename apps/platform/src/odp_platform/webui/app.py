@@ -17,7 +17,6 @@ from odp_platform.common.paths import LOGGING_DIR, ROOT_DIR
 from odp_platform.webui.config_tab import create_config_ui
 from odp_platform.webui.dashboard import create_dashboard_ui
 from odp_platform.webui.dataset_browser import create_dataset_browser_ui
-from odp_platform.webui.experiment_viz import create_experiment_viz_ui
 from odp_platform.webui.model_demo import create_model_demo_ui
 from odp_platform.webui.training_tab import create_training_ui
 from odp_platform.webui.user_tabs import (
@@ -1304,8 +1303,6 @@ def _create_user_tabs() -> None:
             create_model_selection_ui()
         with gr.TabItem("LLM对话"):
             create_llm_chat_ui()
-        with gr.TabItem("实验可视化"):
-            create_experiment_viz_ui()
 
 
 def _create_admin_tabs() -> None:
@@ -1328,8 +1325,6 @@ def _create_admin_tabs() -> None:
             create_dataset_browser_ui()
         with gr.TabItem("训练"):
             create_training_ui()
-        with gr.TabItem("实验可视化"):
-            create_experiment_viz_ui()
         with gr.TabItem("数据校验"):
             create_validation_ui()
         with gr.TabItem("配置管理"):
