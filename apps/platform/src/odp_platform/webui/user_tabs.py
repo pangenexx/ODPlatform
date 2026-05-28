@@ -843,7 +843,7 @@ def create_live_camera_ui() -> None:
         "💡 摄像头画面实时显示检测结果，无需手动拍照。"
     )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        webcam_in = gr.Image(sources="webcam", type="numpy", streaming=True, mirror_webcam=False, label="摄像头")
+        webcam_in = gr.Image(sources="webcam", type="numpy", streaming=True, label="摄像头")
         webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
 
     gr.Markdown("---")
@@ -922,6 +922,19 @@ def create_model_selection_ui() -> None:
             scale=3,
         )
     with gr.Row(elem_classes=["odp-row", "odp-row-action"]):
+        model_upload = gr.File(
+            label="上传 .pt 模型文件",
+            file_types=[".pt"],
+            file_count="single",
+            scale=1,
+        )
+        model_path_input = gr.Textbox(
+            label="或手动输入模型路径",
+            placeholder="eg. F:/models/my_model.pt",
+            max_lines=1,
+            scale=2,
+        )
+    with gr.Row(elem_classes=["odp-row", "odp-row-action"]):
         select_btn = gr.Button("设为当前模型", variant="primary")
         status = gr.Textbox(
             label="状态",
@@ -931,7 +944,28 @@ def create_model_selection_ui() -> None:
             scale=3,
         )
 
+    def _upload_model(file) -> gr.update:
+        if file is None:
+            return gr.update()
+        import shutil
+        from odp_platform.common.paths import CHECKPOINTS_DIR
+        src_name = getattr(file, 'orig_name', None) or Path(file.name).name
+        dst = CHECKPOINTS_DIR / src_name
+        shutil.copy2(file.name, dst)
+        new_models = _model_choices()
+        return gr.update(choices=new_models, value=str(dst))
+
+    def _use_custom_path(path: str) -> gr.update:
+        if not path or not Path(path).exists():
+            return gr.update()
+        new_models = _model_choices()
+        if path not in new_models:
+            new_models.insert(0, path)
+        return gr.update(choices=new_models, value=path)
+
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
+    model_upload.upload(fn=_upload_model, inputs=[model_upload], outputs=[model_dd])
+    model_path_input.submit(fn=_use_custom_path, inputs=[model_path_input], outputs=[model_dd])
     select_btn.click(fn=_select_model, inputs=[model_dd], outputs=[status])
 
 
