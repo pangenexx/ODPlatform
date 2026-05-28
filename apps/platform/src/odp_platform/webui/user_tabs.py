@@ -364,32 +364,36 @@ def _run_server_camera(
         orig_stderr = os.dup(2)
         os.dup2(null_fd, 2)
         try:
-            for try_id in [cam_id, 0, 1]:
-                backends = [cv2.CAP_DSHOW]
-                if hasattr(cv2, "CAP_MSMF"):
-                    backends.insert(0, cv2.CAP_MSMF)
-                for backend in backends:
-                    try:
-                        candidate = cv2.VideoCapture(try_id, backend)
-                        if candidate.isOpened():
-                            cap = candidate
-                            break
-                        candidate.release()
-                    except Exception:
-                        continue
-                if cap is not None:
-                    break
+            backends = [cv2.CAP_DSHOW]
+            if hasattr(cv2, "CAP_MSMF"):
+                backends.insert(0, cv2.CAP_MSMF)
+            for backend in backends:
+                try:
+                    candidate = cv2.VideoCapture(cam_id, backend)
+                    if candidate.isOpened():
+                        cap = candidate
+                        break
+                    candidate.release()
+                except Exception:
+                    continue
+            if cap is None:
+                try:
+                    candidate = cv2.VideoCapture(cam_id)
+                    if candidate.isOpened():
+                        cap = candidate
+                except Exception:
+                    pass
         finally:
             os.dup2(orig_stderr, 2)
             os.close(null_fd)
             os.close(orig_stderr)
 
     if cap is None:
-        no_cam = np.full((480, 640, 3), (55, 55, 55), dtype=np.uint8)
-        cv2.putText(no_cam, "⚠️ 未检测到摄像头", (60, 210),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2)
-        cv2.putText(no_cam, "请插入摄像头后点击“释放并刷新”重试", (40, 260),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (160, 160, 160), 1)
+        no_cam = np.full((480, 640, 3), (120, 120, 120), dtype=np.uint8)
+        cv2.putText(no_cam, "No Camera Detected", (70, 210),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (220, 220, 220), 2)
+        cv2.putText(no_cam, "Press [Release & Refresh] then [Start]", (50, 260),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1)
         while not _server_cam_stop.is_set():
             yield no_cam.copy()
             _time.sleep(0.5)
