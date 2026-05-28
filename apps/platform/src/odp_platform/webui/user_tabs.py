@@ -767,7 +767,6 @@ def create_folder_detection_ui() -> None:
             value=[],
             interactive=False,
             wrap=True,
-            max_rows=10,
         )
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
@@ -816,7 +815,6 @@ def create_video_detection_ui() -> None:
             value=[],
             interactive=False,
             wrap=True,
-            max_rows=15,
         )
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
