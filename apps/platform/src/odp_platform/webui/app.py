@@ -101,6 +101,11 @@ footer {
   display: none !important;
 }
 
+.gradio-container:has(.odp-shell) > main.app > .wrap.default.full.translucent {
+  display: none !important;
+  pointer-events: none !important;
+}
+
 /* ── 修复页面被右侧截断 ── */
 html, body, .gradio-container, main.app, main.app > .wrap,
 main.app > .wrap > .contain, main.app > .wrap > .contain > .column {
@@ -494,13 +499,20 @@ main.app > .wrap > .contain, main.app > .wrap > .contain > .column {
 }
 
 .odp-mode-bar > div,
-.odp-mode-bar > .form {
+.odp-mode-bar > .form,
+.odp-mode-bar .block,
+.odp-mode-bar .html-container,
+.odp-mode-bar .prose {
   display: flex !important;
   justify-content: flex-end !important;
   width: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+  overflow: visible !important;
 }
 
 .odp-mode-bar button,
@@ -522,6 +534,8 @@ button.odp-gear-button {
   box-shadow: none !important;
   text-shadow: none !important;
   transform: none !important;
+  font-size: 20px !important;
+  line-height: 1 !important;
 }
 
 .odp-mode-bar button:hover,
@@ -530,6 +544,10 @@ button.odp-gear-button:hover {
   background: var(--odp-blue-soft) !important;
   color: var(--odp-blue) !important;
   transform: none !important;
+}
+
+.odp-gear-button {
+  font-family: "SF Pro Text", "Segoe UI Symbol", Arial, sans-serif !important;
 }
 
 html.odp-sidebar-collapsed .odp-shell::before,
@@ -941,73 +959,11 @@ div.chatbot [class*="user"] *,
   transform: none !important;
 }
 
+.odp-user-head,
 .odp-admin-head {
   position: relative !important;
   z-index: 2 !important;
   display: grid !important;
-  grid-template-columns: 1fr minmax(180px, 260px) !important;
-  gap: 18px !important;
-  align-items: end !important;
-  width: auto !important;
-  max-width: none !important;
-  margin-left: var(--odp-sidebar) !important;
-  padding: 98px 24px 12px !important;
-  transition: margin-left 180ms ease, padding 180ms ease !important;
-}
-
-.odp-admin-title {
-  min-height: 54px !important;
-  display: flex !important;
-  align-items: center !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--odp-text) !important;
-  font-size: 21px !important;
-  font-weight: 900 !important;
-}
-
-.odp-admin-title-card {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 14px !important;
-  min-height: 54px !important;
-  padding: 0 !important;
-  color: var(--odp-text) !important;
-}
-
-.odp-admin-title-card::before {
-  content: "";
-  width: 10px !important;
-  height: 34px !important;
-  border-radius: 999px !important;
-  background: linear-gradient(180deg, var(--odp-blue), #7c5cff) !important;
-  box-shadow: 0 10px 24px rgba(83, 104, 246, 0.22) !important;
-}
-
-.odp-admin-title-card span {
-  display: block !important;
-  font-size: 26px !important;
-  line-height: 1 !important;
-  font-weight: 950 !important;
-  letter-spacing: 0 !important;
-}
-
-.odp-admin-title-card small {
-  display: block !important;
-  margin-top: 6px !important;
-  color: var(--odp-muted) !important;
-  font-size: 12px !important;
-  line-height: 1.1 !important;
-  font-weight: 800 !important;
-}
-
-.odp-user-head {
-  position: relative !important;
-  z-index: 2 !important;
-  display: grid !important;
-  grid-template-columns: var(--odp-page-title-width) minmax(0, 1fr) !important;
   gap: 14px !important;
   align-items: center !important;
   width: auto !important;
@@ -1017,7 +973,22 @@ div.chatbot [class*="user"] *,
   transition: margin-left 180ms ease, padding 180ms ease !important;
 }
 
-.odp-user-title {
+.odp-user-head {
+  grid-template-columns: var(--odp-page-title-width) minmax(0, 1fr) !important;
+}
+
+.odp-admin-head {
+  grid-template-columns: var(--odp-page-title-width) minmax(150px, auto) !important;
+  justify-content: space-between !important;
+}
+
+.odp-admin-head > .block:last-child {
+  justify-self: end !important;
+  width: auto !important;
+}
+
+.odp-user-title,
+.odp-admin-title {
   width: var(--odp-page-title-width) !important;
   max-width: var(--odp-page-title-width) !important;
   height: 44px !important;
@@ -1034,7 +1005,8 @@ div.chatbot [class*="user"] *,
   font-weight: 900 !important;
 }
 
-.odp-user-title-card {
+.odp-user-title-card,
+.odp-admin-title-card {
   display: inline-flex !important;
   align-items: center !important;
   gap: 10px !important;
@@ -1044,7 +1016,8 @@ div.chatbot [class*="user"] *,
   color: var(--odp-text) !important;
 }
 
-.odp-user-title-card::before {
+.odp-user-title-card::before,
+.odp-admin-title-card::before {
   content: "";
   flex: 0 0 6px !important;
   width: 6px !important;
@@ -1054,7 +1027,8 @@ div.chatbot [class*="user"] *,
   box-shadow: 0 8px 18px rgba(83, 104, 246, 0.18) !important;
 }
 
-.odp-user-title-card span {
+.odp-user-title-card span,
+.odp-admin-title-card span {
   display: block !important;
   overflow: hidden !important;
   font-size: 20px !important;
@@ -1065,7 +1039,8 @@ div.chatbot [class*="user"] *,
   white-space: nowrap !important;
 }
 
-.odp-user-title-card small {
+.odp-user-title-card small,
+.odp-admin-title-card small {
   display: block !important;
   overflow: hidden !important;
   margin-top: 4px !important;
@@ -1077,9 +1052,10 @@ div.chatbot [class*="user"] *,
   white-space: nowrap !important;
 }
 
+.odp-user-layer .tabs,
 .odp-admin-layer .tabs {
   min-height: calc(100vh - 154px) !important;
-  padding-top: 12px !important;
+  padding-top: 8px !important;
   padding-bottom: 36px !important;
 }
 
@@ -1165,13 +1141,13 @@ div.chatbot [class*="user"] *,
 }
 
 .odp-modal-card {
-  width: 390px !important;
+  width: 360px !important;
   max-width: calc(100vw - 48px) !important;
-  padding: 24px !important;
+  padding: 22px !important;
   border: 1px solid var(--odp-line) !important;
-  border-radius: 22px !important;
+  border-radius: 18px !important;
   background: #ffffff !important;
-  box-shadow: 0 28px 80px rgba(23, 24, 43, 0.13) !important;
+  box-shadow: 0 24px 70px rgba(23, 24, 43, 0.14) !important;
 }
 
 .odp-modal-card .block,
@@ -1182,6 +1158,94 @@ div.chatbot [class*="user"] *,
   background: transparent !important;
   box-shadow: none !important;
   min-height: 0 !important;
+}
+
+.odp-admin-login,
+.odp-admin-login * {
+  box-sizing: border-box !important;
+}
+
+.odp-admin-login {
+  width: 100% !important;
+  background: #ffffff !important;
+  color: var(--odp-text) !important;
+}
+
+.odp-modal-card .html-container,
+.odp-modal-card .prose,
+.odp-admin-login-title,
+.odp-admin-form-field,
+.odp-admin-form-field span,
+.odp-admin-error-text,
+.odp-modal-actions {
+  background: #ffffff !important;
+}
+
+.odp-admin-login-title {
+  margin-bottom: 16px !important;
+}
+
+.odp-admin-login-title strong {
+  display: block !important;
+  font-size: 19px !important;
+  line-height: 1.15 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.odp-admin-login-title small {
+  display: block !important;
+  margin-top: 5px !important;
+  color: var(--odp-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+}
+
+.odp-admin-form-field {
+  display: block !important;
+  margin-bottom: 12px !important;
+}
+
+.odp-admin-form-field span {
+  display: block !important;
+  margin-bottom: 7px !important;
+  color: var(--odp-text) !important;
+  font-size: 13px !important;
+  line-height: 1.1 !important;
+  font-weight: 800 !important;
+}
+
+.odp-admin-password-input {
+  width: 100% !important;
+  min-height: 46px !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--odp-line) !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  color: var(--odp-text) !important;
+  box-shadow: 0 8px 18px rgba(23, 24, 43, 0.04) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+.odp-admin-password-input::placeholder {
+  color: #9aa1b2 !important;
+  font-weight: 700 !important;
+}
+
+.odp-admin-error-text {
+  min-height: 18px !important;
+  margin: -2px 0 12px !important;
+  color: var(--odp-pink) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  opacity: 0 !important;
+}
+
+.odp-admin-error-text.is-visible {
+  opacity: 1 !important;
 }
 
 .odp-modal-card > div,
@@ -1230,112 +1294,60 @@ div.chatbot [class*="user"] *,
   display: flex !important;
   gap: 12px !important;
   justify-content: flex-end !important;
-  margin-top: 16px !important;
+  margin-top: 4px !important;
 }
 
 .odp-modal-actions button {
   flex: 1 !important;
 }
 
-/* ── 管理员登录弹窗（纯 HTML） ── */
-.odp-admin-login,
-.odp-admin-login * {
-  box-sizing: border-box !important;
-}
-.odp-admin-login {
-  width: 100% !important;
-  background: #ffffff !important;
-  color: var(--odp-text) !important;
-}
-.odp-modal-card .html-container,
-.odp-modal-card .prose,
-.odp-admin-login-title,
-.odp-admin-form-field,
-.odp-admin-form-field span,
-.odp-admin-error-text,
-.odp-modal-actions {
-  background: #ffffff !important;
-}
-.odp-admin-login-title {
-  margin-bottom: 16px !important;
-}
-.odp-admin-login-title strong {
-  display: block !important;
-  font-size: 19px !important;
-  line-height: 1.15 !important;
-  font-weight: 900 !important;
-  letter-spacing: 0 !important;
-}
-.odp-admin-login-title small {
-  display: block !important;
-  margin-top: 5px !important;
-  color: var(--odp-muted) !important;
-  font-size: 12px !important;
-  line-height: 1.2 !important;
-  font-weight: 700 !important;
-}
-.odp-admin-form-field {
-  display: block !important;
-  margin-bottom: 12px !important;
-}
-.odp-admin-form-field span {
-  display: block !important;
-  margin-bottom: 7px !important;
-  color: var(--odp-text) !important;
-  font-size: 13px !important;
-  line-height: 1.1 !important;
-  font-weight: 800 !important;
-}
-.odp-admin-password-input {
-  width: 100% !important;
-  min-height: 46px !important;
-  padding: 0 14px !important;
-  border: 1px solid var(--odp-line) !important;
-  border-radius: 12px !important;
-  background: #ffffff !important;
-  color: var(--odp-text) !important;
-  box-shadow: 0 8px 18px rgba(23, 24, 43, 0.04) !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-}
-.odp-admin-password-input::placeholder {
-  color: #9aa1b2 !important;
-  font-weight: 700 !important;
-}
-.odp-admin-error-text {
-  min-height: 18px !important;
-  margin: -2px 0 12px !important;
-  color: var(--odp-pink) !important;
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  line-height: 1.2 !important;
-  opacity: 0 !important;
-}
-.odp-admin-error-text.is-visible {
-  opacity: 1 !important;
-}
-
 .odp-admin-cancel-btn,
 .odp-admin-confirm-btn {
   min-height: 44px !important;
-  padding: 0 20px !important;
+  padding: 0 18px !important;
   border-radius: 12px !important;
-  font-weight: 700 !important;
   font-size: 15px !important;
+  font-weight: 800 !important;
   cursor: pointer !important;
-  line-height: 1 !important;
 }
+
 .odp-admin-cancel-btn {
-  flex: 1 !important;
-  background: #f1f3fb !important;
-  color: #17182b !important;
   border: 1px solid var(--odp-line) !important;
+  background: #f1f3fb !important;
+  color: var(--odp-text) !important;
 }
+
 .odp-admin-confirm-btn {
-  flex: 1 !important;
-  background: #5368f6 !important;
-  color: #ffffff !important;
   border: 0 !important;
+  background: var(--odp-blue) !important;
+  color: #ffffff !important;
+}
+
+/* ── 文件夹检测结果区：让明细表有足够宽度 ── */
+.odp-result-row {
+  grid-template-columns: minmax(260px, 0.72fr) minmax(560px, 1.28fr) !important;
+  align-items: start !important;
+}
+
+.odp-result-row div.dataframe {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+.odp-result-row div.dataframe table,
+.odp-result-row div.table-wrap table {
+  width: 100% !important;
+  min-width: 100% !important;
+  table-layout: auto !important;
+}
+
+.odp-result-row div.dataframe table th,
+.odp-result-row div.dataframe table td,
+.odp-result-row div.table-wrap table th,
+.odp-result-row div.table-wrap table td {
+  white-space: nowrap !important;
+  padding: 9px 12px !important;
+  font-size: 13px !important;
 }
 
 /* ── Agent 工具开关 ── */
@@ -1372,8 +1384,15 @@ div.chatbot [class*="user"] *,
   }
 }
 
+@media (max-width: 980px) {
+  .odp-result-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 @media (max-width: 820px) {
   .tabs,
+  .odp-user-head,
   .odp-admin-head {
     margin-left: var(--odp-sidebar-mini) !important;
     width: auto !important;
@@ -1405,6 +1424,8 @@ div.chatbot [class*="user"] *,
   .odp-row-three,
   .odp-row-four,
   .odp-row-five,
+  .odp-result-row,
+  .odp-user-head,
   .odp-admin-head {
     grid-template-columns: 1fr !important;
   }
@@ -1445,6 +1466,9 @@ html { scrollbar-gutter: stable; }
   overflow-x: hidden !important;
 }
 
+/* JS layer control: hidden by default */
+.odp-layer-hidden { display: none !important; }
+
 /* ── 强制白底（覆盖Gradio 6.0深色主题） ── */
 body,
 html,
@@ -1482,6 +1506,184 @@ button[aria-label="全屏"],
 button[aria-label="Fullscreen"],
 button:has(svg[data-testid="FullscreenIcon"]) {
   display: none !important;
+}
+
+/* ─────────────────────────────────────────────
+   Fix: 顶部参数栏 Slider 数值输入框被遮挡
+   关键点：Gradio Slider 内部的 number input / reset button 被全局 input/button 高度规则污染。
+   这里只针对顶部阈值滑条做局部重置。
+───────────────────────────────────────────── */
+.odp-param-row {
+  grid-template-columns: repeat(2, minmax(360px, 1fr)) !important;
+  overflow: visible !important;
+  align-items: stretch !important;
+}
+
+.odp-param-row,
+.odp-param-row > *,
+.odp-param-row > .form,
+.odp-param-row > .form > *,
+.odp-param-row .block,
+.odp-param-row .form,
+.odp-param-row .label-wrap,
+.odp-param-row .wrap,
+.odp-param-row .wrap-inner,
+.odp-param-row .input-container,
+.odp-param-row .secondary-wrap {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+.odp-param-row > .block,
+.odp-param-row > .form > .block,
+.odp-param-row > button,
+.odp-param-row > .form > button {
+  min-height: 106px !important;
+}
+
+/* Dropdown / 刷新按钮可以保持卡片样式 */
+.odp-param-row > button,
+.odp-param-row > .form > button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* 只修 Confidence / IoU 两个阈值滑条 */
+.odp-threshold-slider,
+.odp-param-row .block.odp-threshold-slider,
+.odp-param-row .block:has(input[type="range"]) {
+  min-width: 360px !important;
+  min-height: 106px !important;
+  overflow: hidden !important;
+}
+
+.odp-threshold-slider *,
+.odp-param-row .block.odp-threshold-slider *,
+.odp-param-row .block:has(input[type="range"]) * {
+  box-sizing: border-box !important;
+  overflow-wrap: normal !important;
+  word-break: keep-all !important;
+  white-space: nowrap !important;
+}
+
+/* Slider 顶部：左边 label，右边数值框 */
+.odp-threshold-slider .label-wrap,
+.odp-param-row .block.odp-threshold-slider .label-wrap,
+.odp-param-row .block:has(input[type="range"]) .label-wrap {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 8px 14px 0 !important;
+  overflow: visible !important;
+}
+
+.odp-threshold-slider .label-wrap label,
+.odp-param-row .block.odp-threshold-slider .label-wrap label,
+.odp-param-row .block:has(input[type="range"]) .label-wrap label {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* 重点：撤销全局 input 的 48px 高度，否则 number input 会顶坏 Slider */
+.odp-threshold-slider input[type="number"],
+.odp-param-row .block.odp-threshold-slider input[type="number"],
+.odp-param-row .block:has(input[type="range"]) input[type="number"] {
+  display: inline-block !important;
+  width: 78px !important;
+  min-width: 78px !important;
+  max-width: 78px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  padding: 0 8px !important;
+  margin: 0 !important;
+  border-radius: 10px !important;
+  line-height: 30px !important;
+  text-align: center !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  flex: 0 0 78px !important;
+}
+
+/* 重点：撤销全局 input 的 48px 高度，否则 range 轨道会被撑乱 */
+.odp-threshold-slider input[type="range"],
+.odp-param-row .block.odp-threshold-slider input[type="range"],
+.odp-param-row .block:has(input[type="range"]) input[type="range"] {
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex: 1 1 auto !important;
+  min-width: 180px !important;
+  width: auto !important;
+  background: transparent !important;
+}
+
+/* 重点：Gradio Slider 的 reset 小按钮会被全局 button min-height:52px 污染；这里隐藏它 */
+.odp-threshold-slider button,
+.odp-param-row .block.odp-threshold-slider button,
+.odp-param-row .block:has(input[type="range"]) button {
+  display: none !important;
+}
+
+/* Slider 主体区域 */
+.odp-threshold-slider .wrap,
+.odp-threshold-slider .wrap-inner,
+.odp-threshold-slider .secondary-wrap,
+.odp-param-row .block.odp-threshold-slider .wrap,
+.odp-param-row .block.odp-threshold-slider .wrap-inner,
+.odp-param-row .block.odp-threshold-slider .secondary-wrap,
+.odp-param-row .block:has(input[type="range"]) .wrap,
+.odp-param-row .block:has(input[type="range"]) .wrap-inner,
+.odp-param-row .block:has(input[type="range"]) .secondary-wrap {
+  min-height: 48px !important;
+  height: 48px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  padding: 0 14px 10px !important;
+  overflow: visible !important;
+}
+
+/* min / max 文本禁止断行，避免 0.01 被拆成两行 */
+.odp-threshold-slider span,
+.odp-param-row .block.odp-threshold-slider span,
+.odp-param-row .block:has(input[type="range"]) span {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  min-width: fit-content !important;
+}
+
+@media (min-width: 2100px) {
+  .odp-param-row {
+    grid-template-columns:
+      minmax(280px, 1fr)
+      minmax(140px, 0.45fr)
+      minmax(390px, 1.2fr)
+      minmax(390px, 1.2fr) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .odp-param-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .odp-threshold-slider,
+  .odp-param-row .block.odp-threshold-slider,
+  .odp-param-row .block:has(input[type="range"]) {
+    min-width: 0 !important;
+  }
 }
 
 """
@@ -1556,23 +1758,43 @@ _JS_SETUP = """
 }
 .odp-admin-modal.odp-modal-hidden { display: none !important; }
 </style>
-<script>
+<img alt="" aria-hidden="true" src="/__odp_bootstrap_missing__.gif" style="display:none" onerror="
 (function(){
-  function restoreAdmin() {
-    if (localStorage.getItem('odp_admin') === '1') {
-      var u = document.querySelector('.odp-user-layer');
-      var a = document.querySelector('.odp-admin-layer');
-      if (u) u.classList.add('odp-layer-hidden');
-      if (a) a.classList.remove('odp-layer-hidden');
+  if(window.__odpBootstrapDone)return;
+  window.__odpBootstrapDone=true;
+  function resetContentScroll(){
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        var root=document.scrollingElement||document.documentElement;
+        if(root)root.scrollTop=0;
+        document.documentElement.scrollTop=0;
+        document.body.scrollTop=0;
+        document.querySelectorAll('.tabs,.tabitem').forEach(function(node){node.scrollTop=0;});
+      });
+    });
+  }
+  function restoreAdmin(){
+    if(localStorage.getItem('odp_admin')!=='1')return;
+    var user=document.querySelector('.odp-user-layer');
+    var admin=document.querySelector('.odp-admin-layer');
+    if(user&&admin){
+      user.classList.add('odp-layer-hidden');
+      admin.classList.remove('odp-layer-hidden');
+      resetContentScroll();
+    }else{
+      setTimeout(restoreAdmin,80);
     }
   }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', restoreAdmin);
-  } else {
-    restoreAdmin();
-  }
+  window.odpResetContentScroll=resetContentScroll;
+  document.addEventListener('click',function(event){
+    var target=event.target;
+    var tab=target&&target.closest?target.closest('[role=tab]'):null;
+    if(tab&&tab.closest('.odp-user-layer,.odp-admin-layer'))resetContentScroll();
+  },true);
+  restoreAdmin();
 })();
-</script>
+this.onerror=null;this.remove();
+">
 """
 
 

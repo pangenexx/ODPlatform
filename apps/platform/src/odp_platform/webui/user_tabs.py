@@ -692,7 +692,7 @@ def create_single_detection_ui() -> None:
     models = _model_choices()
     detector_state = gr.State(None)
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+    with gr.Row(elem_classes=["odp-row", "odp-param-row"]):
         model_dd = gr.Dropdown(
             choices=models,
             value=models[0] if models else None,
@@ -701,8 +701,14 @@ def create_single_detection_ui() -> None:
             interactive=True,
         )
         refresh_btn = gr.Button("刷新")
-        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
-        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+        conf_slider = gr.Slider(
+            0.01, 0.99, 0.25, step=0.01, precision=2, label="Confidence",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
+        iou_slider = gr.Slider(
+            0.01, 0.99, 0.45, step=0.01, precision=2, label="IoU",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
 
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         with gr.Column(scale=1):
@@ -726,7 +732,7 @@ def create_folder_detection_ui() -> None:
     detector_state = gr.State(None)
     folder_results_state = gr.State([])
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+    with gr.Row(elem_classes=["odp-row", "odp-param-row"]):
         model_dd = gr.Dropdown(
             choices=models,
             value=models[0] if models else None,
@@ -735,8 +741,14 @@ def create_folder_detection_ui() -> None:
             interactive=True,
         )
         refresh_btn = gr.Button("刷新")
-        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
-        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+        conf_slider = gr.Slider(
+            0.01, 0.99, 0.25, step=0.01, precision=2, label="Confidence",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
+        iou_slider = gr.Slider(
+            0.01, 0.99, 0.45, step=0.01, precision=2, label="IoU",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
 
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         with gr.Column(scale=1):
@@ -759,7 +771,7 @@ def create_folder_detection_ui() -> None:
                 label="文件夹检测结果", columns=3, height=480,
                 object_fit="contain",
             )
-    with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
+    with gr.Row(elem_classes=["odp-row", "odp-result-row"]):
         folder_summary = gr.JSON(label="统计摘要", value={})
         folder_detail = gr.Dataframe(
             label="检测明细",
@@ -779,7 +791,7 @@ def create_folder_detection_ui() -> None:
 def create_video_detection_ui() -> None:
     models = _model_choices()
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+    with gr.Row(elem_classes=["odp-row", "odp-param-row"]):
         model_dd = gr.Dropdown(
             choices=models,
             value=models[0] if models else None,
@@ -788,8 +800,14 @@ def create_video_detection_ui() -> None:
             interactive=True,
         )
         refresh_btn = gr.Button("刷新")
-        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
-        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+        conf_slider = gr.Slider(
+            0.01, 0.99, 0.25, step=0.01, precision=2, label="Confidence",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
+        iou_slider = gr.Slider(
+            0.01, 0.99, 0.45, step=0.01, precision=2, label="IoU",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
 
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         with gr.Column(scale=1):
@@ -826,7 +844,7 @@ def create_video_detection_ui() -> None:
 def create_live_camera_ui() -> None:
     models = _model_choices()
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+    with gr.Row(elem_classes=["odp-row", "odp-param-row"]):
         model_dd = gr.Dropdown(
             choices=models,
             value=models[0] if models else None,
@@ -835,8 +853,14 @@ def create_live_camera_ui() -> None:
             interactive=True,
         )
         refresh_btn = gr.Button("刷新")
-        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
-        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+        conf_slider = gr.Slider(
+            0.01, 0.99, 0.25, step=0.01, precision=2, label="Confidence",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
+        iou_slider = gr.Slider(
+            0.01, 0.99, 0.45, step=0.01, precision=2, label="IoU",
+            min_width=360, buttons=[], elem_classes=["odp-threshold-slider"],
+        )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10, scale=1)
         cam_res = gr.Dropdown(
@@ -1207,7 +1231,7 @@ def create_llm_chat_ui() -> None:
                 placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
-    with gr.Row(elem_classes=["odp-row", "odp-agent-toggle"]):
+    with gr.Row(elem_classes=["odp-agent-toggle"]):
         enable_tools = gr.Checkbox(
             label="✅ Agent 工具已启用（模型/实验/推理/GPU）",
             value=True,
