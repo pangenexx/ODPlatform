@@ -353,8 +353,6 @@ def _run_server_camera(
     import time as _time
 
     os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
-    os.environ["OBSENSOR_DEBUG"] = "0"
-    cv2.setLogLevel(0)
     warnings.filterwarnings("ignore", message=".*obsensor.*")
     warnings.filterwarnings("ignore", message=".*FFMPEG.*")
     warnings.filterwarnings("ignore", message=".*backend.*")
@@ -364,27 +362,35 @@ def _run_server_camera(
 
     cap = None
     with contextlib.redirect_stderr(io.StringIO()):
-        backends_to_try = [cv2.CAP_DSHOW]
-        if hasattr(cv2, "CAP_MSMF"):
-            backends_to_try.insert(0, cv2.CAP_MSMF)
+        null_fd = os.open(os.devnull, os.O_WRONLY)
+        orig_stderr = os.dup(2)
+        os.dup2(null_fd, 2)
+        try:
+            backends_to_try = [cv2.CAP_DSHOW]
+            if hasattr(cv2, "CAP_MSMF"):
+                backends_to_try.insert(0, cv2.CAP_MSMF)
 
-        for backend in backends_to_try:
-            try:
-                candidate = cv2.VideoCapture(cam_id, backend)
-                if candidate.isOpened():
-                    cap = candidate
-                    break
-                candidate.release()
-            except Exception:
-                continue
+            for backend in backends_to_try:
+                try:
+                    candidate = cv2.VideoCapture(cam_id, backend)
+                    if candidate.isOpened():
+                        cap = candidate
+                        break
+                    candidate.release()
+                except Exception:
+                    continue
 
-        if cap is None:
-            try:
-                cap = cv2.VideoCapture(cam_id)
-                if not cap.isOpened():
+            if cap is None:
+                try:
+                    cap = cv2.VideoCapture(cam_id)
+                    if not cap.isOpened():
+                        cap = None
+                except Exception:
                     cap = None
-            except Exception:
-                cap = None
+        finally:
+            os.dup2(orig_stderr, 2)
+            os.close(null_fd)
+            os.close(orig_stderr)
 
     if cap is None:
         no_cam = np.full((480, 640, 3), (245, 245, 245), dtype=np.uint8)
