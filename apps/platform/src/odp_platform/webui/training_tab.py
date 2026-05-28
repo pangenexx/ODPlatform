@@ -568,7 +568,8 @@ def create_training_ui() -> None:
             interactive=True,
         )
         refresh_exp_btn = gr.Button("刷新实验列表")
-    exp_summary = gr.Textbox(label="实验摘要", lines=6, interactive=False)
+    with gr.Row():
+        exp_summary = gr.Textbox(label="实验摘要", lines=6, interactive=False)
 
     with gr.Tabs():
         with gr.TabItem("训练曲线"):
