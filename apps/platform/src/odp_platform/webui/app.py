@@ -650,6 +650,39 @@ html.odp-sidebar-collapsed .odp-admin-head,
   grid-template-columns: minmax(220px, 0.65fr) minmax(360px, 2fr) !important;
 }
 
+/* ── 模式切换 Radio ── */
+.odp-mode-radio {
+  display: flex !important;
+  gap: 4px !important;
+  margin-bottom: 8px !important;
+  padding: 4px !important;
+  background: var(--odp-bg-soft) !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--odp-line) !important;
+  width: fit-content !important;
+}
+.odp-mode-radio label {
+  flex: 1 !important;
+  padding: 8px 24px !important;
+  margin: 0 !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  text-align: center !important;
+  background: transparent !important;
+  color: var(--odp-text-muted) !important;
+  transition: all 0.15s ease !important;
+}
+.odp-mode-radio label:has(input:checked) {
+  background: var(--odp-blue) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(58, 104, 226, 0.3) !important;
+}
+.odp-mode-radio input[type="radio"] {
+  display: none !important;
+}
+
 .odp-row-two {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }

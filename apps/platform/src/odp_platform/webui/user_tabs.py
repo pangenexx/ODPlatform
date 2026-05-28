@@ -151,7 +151,9 @@ def _run_single_detection(
         return rendered, rows, status, detector
     except Exception as exc:
         logger.exception("单图检测失败")
-        return None, [], f"检测失败: {exc}", detector_state
+        import numpy as np
+        blank = np.full((100, 300, 3), 200, dtype=np.uint8)
+        return blank, [], f"检测失败: {exc}", detector_state
 
 
 def _run_folder_detection(
@@ -212,6 +214,110 @@ def _run_folder_detection(
 
     status = f"处理完成: {len(results)}/{len(image_paths)} 张 | 模型: {Path(model_path).name}"
     return results, status, detector
+
+
+def _run_folder_detection_wrapped(
+    folder_path: str,
+    output_dir: str,
+    model_path: str,
+    conf: float,
+    iou: float,
+    detector_state: Any,
+) -> tuple:
+    if not folder_path:
+        return [], "请输入文件夹路径", detector_state, {}, [], []
+    if not model_path:
+        return [], "未选择模型", detector_state, {}, [], []
+
+    try:
+        import cv2
+        import numpy as np
+        from PIL import Image
+
+        from odp_platform.inference.visualizer import draw_detections
+    except ImportError as exc:
+        return [], f"依赖未就绪: {exc}", detector_state, {}, [], []
+
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return [], f"路径不存在: {folder_path}", detector_state, {}, [], []
+
+    image_paths = list_images(folder)
+    if not image_paths:
+        return [], f"文件夹中无图片: {folder_path}", detector_state, {}, [], []
+
+    is_cached = (
+        detector_state is not None
+        and hasattr(detector_state, '_model_path')
+        and detector_state._model_path == model_path
+    )
+    if is_cached:
+        detector = detector_state
+    else:
+        try:
+            from odp_platform.inference.engine import Detector
+            detector = Detector(model_path)
+        except Exception as exc:
+            return [], f"模型加载失败: {exc}", detector_state, {}, [], []
+        detector._model_path = model_path
+    detector.conf = float(conf)
+    detector.iou = float(iou)
+
+    if output_dir:
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+    else:
+        out_path = None
+
+    results = []
+    detail_rows = []
+    class_totals: dict[str, int] = {}
+    total_ms = 0.0
+    total_objs = 0
+
+    for img_path in image_paths[:100]:
+        try:
+            image = np.array(Image.open(img_path))
+            t0 = __import__("time").time()
+            result = detector.detect(image)
+            elapsed = (__import__("time").time() - t0) * 1000
+            rendered = draw_detections(image, result.detections)
+            results.append(rendered)
+
+            if out_path:
+                rendered_bgr = cv2.cvtColor(rendered, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(out_path / f"{img_path.stem}_result.jpg"), rendered_bgr)
+
+            classes_in_img = {}
+            for d in result.detections:
+                classes_in_img[d.class_name] = classes_in_img.get(d.class_name, 0) + 1
+                class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
+            total_objs += len(result.detections)
+            total_ms += elapsed
+
+            class_str = ", ".join(f"{k}:{v}" for k, v in classes_in_img.items()) if classes_in_img else "-"
+            detail_rows.append([
+                img_path.name,
+                len(result.detections),
+                class_str,
+                round(sum(d.confidence for d in result.detections) / max(len(result.detections), 1), 4),
+                round(elapsed, 1),
+            ])
+        except Exception as exc:
+            logger.warning("跳过图片 %s: %s", img_path, exc)
+            detail_rows.append([img_path.name, 0, "error", 0, 0])
+            continue
+
+    summary = {
+        "总图片": len(image_paths),
+        "成功": len(results),
+        "总目标数": total_objs,
+        "总耗时(ms)": round(total_ms, 1),
+        "平均每张(ms)": round(total_ms / max(len(results), 1), 1),
+        "类别分布": class_totals,
+    }
+    status = f"处理完成: {len(results)}/{len(image_paths)} 张 | {total_objs} 个目标 | 模型: {Path(model_path).name}"
+    return results, status, detector, summary, detail_rows, detail_rows
 
 
 def _process_webcam_frame(
@@ -448,6 +554,7 @@ def _clear_chat() -> tuple[list[dict[str, str]], str]:
 def create_image_detection_ui() -> None:
     models = _model_choices()
     detector_state = gr.State(None)
+    folder_results_state = gr.State([])
 
     with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
         model_dd = gr.Dropdown(
@@ -461,25 +568,71 @@ def create_image_detection_ui() -> None:
         conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
         iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        with gr.Column(scale=1):
-            image_in = gr.Image(type="numpy", label="点击上传图片", sources=["upload"])
-            detect_btn = gr.Button("开始检测", variant="primary")
-        with gr.Column(scale=1):
-            folder_in = gr.Textbox(
-                label="图片文件夹路径",
-                placeholder="eg. F:/datasets/test_images",
-                max_lines=1,
+    mode_radio = gr.Radio(
+        choices=["单图检测", "文件夹检测"],
+        value="单图检测",
+        label="检测模式",
+        interactive=True,
+        elem_classes=["odp-mode-radio"],
+    )
+
+    # ========== 单图检测区域 ==========
+    with gr.Column(visible=True, elem_classes=["odp-single-mode"]) as single_col:
+        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+            with gr.Column(scale=1):
+                image_in = gr.Image(type="numpy", label="上传图片", sources=["upload"])
+                detect_btn = gr.Button("开始检测", variant="primary", size="lg")
+            with gr.Column(scale=1):
+                image_out = gr.Image(type="numpy", label="检测结果", container=True)
+        status = gr.Textbox(label="状态", value="等待检测", interactive=False, max_lines=1)
+        result_json = gr.JSON(label="检测列表")
+
+    # ========== 文件夹检测区域 ==========
+    with gr.Column(visible=False, elem_classes=["odp-folder-mode"]) as folder_col:
+        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+            with gr.Column(scale=1):
+                folder_in = gr.Textbox(
+                    label="图片文件夹路径",
+                    placeholder="eg. F:/datasets/test_images",
+                    max_lines=1,
+                )
+                output_dir = gr.Textbox(
+                    label="输出目录（可选）",
+                    placeholder="留空默认 outputs/detect",
+                    max_lines=1,
+                )
+                folder_detect_btn = gr.Button("处理文件夹", variant="primary", size="lg")
+                folder_status = gr.Textbox(
+                    label="状态", value="等待处理", interactive=False, max_lines=1
+                )
+            with gr.Column(scale=2):
+                folder_gallery = gr.Gallery(
+                    label="文件夹检测结果", columns=3, height=480,
+                    object_fit="contain",
+                )
+        with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
+            folder_summary = gr.JSON(label="统计摘要", value={})
+            folder_detail = gr.Dataframe(
+                label="检测明细",
+                headers=["文件名", "检测数", "类别", "平均置信度", "耗时(ms)"],
+                value=[],
+                interactive=False,
+                wrap=True,
+                max_rows=10,
             )
-            folder_detect_btn = gr.Button("处理文件夹", variant="primary")
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        image_out = gr.Image(type="numpy", label="检测结果", container=True)
-        folder_gallery = gr.Gallery(label="文件夹检测结果", columns=3, height=400)
+    # ========== 模式切换 ==========
+    mode_radio.change(
+        fn=lambda m: (
+            gr.update(visible=m == "单图检测"),
+            gr.update(visible=m == "文件夹检测"),
+        ),
+        inputs=[mode_radio],
+        outputs=[single_col, folder_col],
+    )
 
-    status = gr.Textbox(label="状态", value="等待检测", interactive=False, max_lines=1)
-    result_json = gr.JSON(label="检测列表")
-
+    # ========== 实时摄像头检测（始终显示） ==========
+    gr.Markdown("---")
     gr.Markdown("### 实时摄像头检测")
     webcam_status = gr.Textbox(
         label="摄像头状态",
@@ -489,17 +642,15 @@ def create_image_detection_ui() -> None:
     )
     gr.Markdown(
         "💡 **使用说明**：① 点击上方「摄像头」画面  ② 浏览器弹出权限请求时点击「允许」  "
-        "③ 画面出现后自动开始逐帧推理。如果使用虚拟摄像头（VTubeStudioCam等），"
-        "请先在系统中开启虚拟摄像头再刷新页面。"
+        "③ 画面出现后自动开始逐帧推理。"
     )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         webcam_in = gr.Image(sources="webcam", type="numpy", label="摄像头")
         webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
 
-    with gr.Accordion("服务器摄像头（OpenCV，兼容虚拟摄像头）", open=False):
+    with gr.Accordion("服务器摄像头（OpenCV）", open=False):
         gr.Markdown(
-            "服务器端直接通过 OpenCV 读取摄像头，不依赖浏览器 MediaDevices，"
-            "兼容虚拟摄像头软件（VTubeStudioCam、OBS Virtual Camera 等）。"
+            "服务器端直接通过 OpenCV 读取摄像头，不依赖浏览器 MediaDevices。"
         )
         with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
             cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10)
@@ -515,6 +666,7 @@ def create_image_detection_ui() -> None:
         )
         server_cam_out = gr.Image(streaming=True, label="服务器摄像头实时检测结果", container=True)
 
+    # ========== 事件绑定 ==========
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
 
     detect_btn.click(
@@ -524,9 +676,9 @@ def create_image_detection_ui() -> None:
     )
 
     folder_detect_btn.click(
-        fn=_run_folder_detection,
-        inputs=[folder_in, model_dd, conf_slider, iou_slider, detector_state],
-        outputs=[folder_gallery, status, detector_state],
+        fn=_run_folder_detection_wrapped,
+        inputs=[folder_in, output_dir, model_dd, conf_slider, iou_slider, detector_state],
+        outputs=[folder_gallery, folder_status, detector_state, folder_summary, folder_detail, folder_results_state],
     )
 
     webcam_in.stream(
